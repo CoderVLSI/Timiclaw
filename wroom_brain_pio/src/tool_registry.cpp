@@ -171,6 +171,7 @@ void build_help_text(String &out) {
       "time_show\n"
       "soul_show | soul_set <text> | soul_clear\n"
       "heartbeat_show | heartbeat_set <text> | heartbeat_clear\n"
+      "generate_image <prompt>\n"
       "confirm [id]\n"
       "cancel\n"
       "sensor_read <pin>\n"
@@ -199,7 +200,7 @@ void tool_registry_init() {
       "task_add/task_list/task_done/task_clear, "
       "email_draft/email_show/email_clear, safe_mode, logs, time_show, "
       "soul_show/soul_set/soul_clear, heartbeat_show/heartbeat_set/heartbeat_clear, "
-      "remember <note>, memory, forget");
+      "remember <note>, memory, forget, generate_image <prompt>");
 }
 
 static bool parse_two_ints(const String &s, const char *fmt, int *a, int *b) {
@@ -1862,6 +1863,33 @@ bool tool_registry_execute(const String &input, String &out) {
       return true;
     }
     out = "OK: remembered";
+    return true;
+  }
+
+  if (cmd_lc == "generate_image" || cmd_lc.startsWith("generate_image ")) {
+    String prompt = "";
+    if (cmd_lc.startsWith("generate_image ")) {
+      prompt = cmd.substring(14);
+      prompt.trim();
+    }
+    if (prompt.length() == 0) {
+      out = "ERR: usage generate_image <prompt>";
+      return true;
+    }
+
+    String base64_image;
+    String llm_error;
+    if (!llm_generate_image(prompt, base64_image, llm_error)) {
+      out = "ERR: " + llm_error;
+      return true;
+    }
+
+    if (!transport_telegram_send_photo_base64(base64_image, "")) {
+      out = "ERR: failed to send photo";
+      return true;
+    }
+
+    out = "Image generated and sent";
     return true;
   }
 

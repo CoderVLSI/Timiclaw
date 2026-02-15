@@ -497,3 +497,64 @@ bool llm_route_tool_command(const String &message, String &command_out, String &
   command_out = routed;
   return true;
 }
+
+bool llm_generate_image(const String &prompt, String &base64_out, String &error_out) {
+  const String provider = to_lower(String(IMAGE_PROVIDER));
+  const String api_key = String(IMAGE_API_KEY);
+
+  if (provider != "gemini" && provider != "openai") {
+    error_out = "Image generation requires IMAGE_PROVIDER=gemini or openai in .env";
+    return false;
+  }
+
+  if (api_key.length() == 0) {
+    error_out = "Missing IMAGE_API_KEY in .env";
+    return false;
+  }
+
+  if (prompt.length() == 0) {
+    error_out = "Missing prompt";
+    return false;
+  }
+
+  if (provider == "gemini") {
+    const String url = String("https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=") + api_key;
+    const String body = String("{\"instances\":[{\"prompt\":\"") + json_escape(prompt) +
+                        "\"}],\"parameters\":{\"sampleCount\":1}}";
+
+    const HttpResult res = http_post_json(url, body);
+    if (res.status_code < 200 || res.status_code >= 300) {
+      error_out = "Imagen HTTP " + String(res.status_code);
+      return false;
+    }
+
+    if (!extract_json_string_after(res.body, "\"bytesBase64Encoded\":\"", base64_out)) {
+      error_out = "Could not parse Imagen response";
+      return false;
+    }
+
+    return true;
+  }
+
+  if (provider == "openai") {
+    const String url = join_url(String(LLM_OPENAI_BASE_URL), "/v1/images/generations");
+    const String body = String("{\"model\":\"dall-e-3\",\"prompt\":\"") + json_escape(prompt) +
+                        "\",\"n\":1,\"size\":\"1024x1024\",\"response_format\":\"b64_json\"}";
+
+    const HttpResult res = http_post_json(url, body, "Authorization", "Bearer " + api_key);
+    if (res.status_code < 200 || res.status_code >= 300) {
+      error_out = "DALL-E HTTP " + String(res.status_code);
+      return false;
+    }
+
+    if (!extract_json_string_after(res.body, "\"b64_json\":\"", base64_out)) {
+      error_out = "Could not parse DALL-E response";
+      return false;
+    }
+
+    return true;
+  }
+
+  error_out = "Image generation requires IMAGE_PROVIDER=gemini or openai in .env";
+  return false;
+}

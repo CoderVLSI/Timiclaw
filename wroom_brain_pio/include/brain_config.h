@@ -63,6 +63,15 @@
 #define LLM_TIMEOUT_MS 25000
 #endif
 
+// Image generation provider (separate from chat LLM)
+#ifndef IMAGE_PROVIDER
+#define IMAGE_PROVIDER "none"
+#endif
+
+#ifndef IMAGE_API_KEY
+#define IMAGE_API_KEY ""
+#endif
+
 #ifndef MEMORY_MAX_CHARS
 #define MEMORY_MAX_CHARS 1800
 #endif

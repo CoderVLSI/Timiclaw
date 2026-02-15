@@ -325,3 +325,147 @@ void transport_telegram_poll(incoming_cb_t cb) {
   s_last_update_id = update_id;
   cb(text);
 }
+
+namespace {
+
+static int base64_char_value(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+
+static size_t base64_decode(const String &input, uint8_t *output, size_t output_size) {
+  size_t input_len = input.length();
+  size_t output_index = 0;
+
+  for (size_t i = 0; i < input_len && output_index < output_size; i += 4) {
+    int values[4];
+    int valid_count = 0;
+
+    for (int j = 0; j < 4 && (i + j) < input_len; j++) {
+      char c = input[i + j];
+      if (c == '=') {
+        values[j] = 0;
+        valid_count++;
+      } else if (c == ' ' || c == '\n' || c == '\r' || c == '\t') {
+        continue;
+      } else {
+        int val = base64_char_value(c);
+        if (val < 0) continue;
+        values[j] = val;
+        valid_count++;
+      }
+    }
+
+    if (valid_count >= 2) {
+      if (output_index < output_size) {
+        output[output_index++] = (values[0] << 2) | ((values[1] & 0x30) >> 4);
+      }
+      if (valid_count >= 3 && output_index < output_size) {
+        output[output_index++] = ((values[1] & 0x0F) << 4) | ((values[2] & 0x3C) >> 2);
+      }
+      if (valid_count >= 4 && output_index < output_size) {
+        output[output_index++] = ((values[2] & 0x03) << 6) | values[3];
+      }
+    }
+  }
+
+  return output_index;
+}
+
+static size_t base64_decoded_size(const String &input) {
+  size_t len = input.length();
+  size_t padding = 0;
+  if (len > 0 && input[len - 1] == '=') padding++;
+  if (len > 1 && input[len - 2] == '=') padding++;
+  return (len * 3) / 4 - padding;
+}
+
+}  // namespace
+
+bool transport_telegram_send_photo_base64(const String &base64_data, const String &caption) {
+  if (!is_wifi_ready()) {
+    ensure_wifi();
+    if (!is_wifi_ready()) {
+      return false;
+    }
+  }
+
+  const size_t decoded_len = base64_decoded_size(base64_data);
+  if (decoded_len > 200000) {
+    Serial.println("[tg] Image too large, skipping");
+    return false;
+  }
+
+  uint8_t *binary_data = (uint8_t *)malloc(decoded_len);
+  if (!binary_data) {
+    Serial.println("[tg] Failed to allocate memory for photo");
+    return false;
+  }
+
+  const size_t actual_len = base64_decode(base64_data, binary_data, decoded_len);
+
+  String boundary = "----esp32photoboundary" + String((unsigned long)millis());
+
+  String headers;
+  headers.reserve(512);
+  headers += "--" + boundary + "\r\n";
+  headers += "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n";
+  headers += s_last_chat_id + "\r\n";
+
+  if (caption.length() > 0) {
+    headers += "--" + boundary + "\r\n";
+    headers += "Content-Disposition: form-data; name=\"caption\"\r\n\r\n";
+    headers += caption + "\r\n";
+  }
+
+  headers += "--" + boundary + "\r\n";
+  headers += "Content-Disposition: form-data; name=\"photo\"; filename=\"generated.png\"\r\n";
+  headers += "Content-Type: image/png\r\n\r\n";
+
+  String footer = "\r\n--" + boundary + "--\r\n";
+
+  const size_t total_size = headers.length() + actual_len + footer.length();
+
+  uint8_t *payload = (uint8_t *)malloc(total_size);
+  if (!payload) {
+    free(binary_data);
+    Serial.println("[tg] Failed to allocate memory for photo payload");
+    return false;
+  }
+
+  size_t offset = 0;
+  memcpy(payload + offset, headers.c_str(), headers.length());
+  offset += headers.length();
+  memcpy(payload + offset, binary_data, actual_len);
+  offset += actual_len;
+  memcpy(payload + offset, footer.c_str(), footer.length());
+
+  free(binary_data);
+
+  const String url = String("https://api.telegram.org/bot") + TELEGRAM_BOT_TOKEN + "/sendPhoto";
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient https;
+  if (!https.begin(client, url)) {
+    free(payload);
+    return false;
+  }
+
+  https.setConnectTimeout(12000);
+  https.setTimeout(30000);
+  https.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+
+  const int code = https.POST(payload, total_size);
+  free(payload);
+
+  Serial.print("[tg] sendPhoto code=");
+  Serial.println(code);
+
+  https.end();
+  return code >= 200 && code < 300;
+}

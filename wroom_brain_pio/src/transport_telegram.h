@@ -13,5 +13,6 @@ bool transport_telegram_send_document(const String &filename, const String &cont
 bool transport_telegram_send_document_base64(const String &filename, const String &base64_content,
                                              const String &mime_type, const String &caption);
 bool transport_telegram_get_last_photo_base64(String &mime_out, String &base64_out, String &error_out);
+bool transport_telegram_send_photo_base64(const String &base64_data, const String &caption);
 
 #endif
