@@ -75,6 +75,9 @@ web_job_endpoint_url = parsed.get("WEB_JOB_ENDPOINT_URL", "")
 web_job_api_key = parsed.get("WEB_JOB_API_KEY", "")
 web_job_timeout_ms = parsed.get("WEB_JOB_TIMEOUT_MS", "20000")
 
+image_provider = parsed.get("IMAGE_PROVIDER", "none")
+image_api_key = parsed.get("IMAGE_API_KEY", "")
+
 if (
     not poll_ms.isdigit()
     or not status_enabled.isdigit()
@@ -152,6 +155,8 @@ generated_header.write_text(
             f"#define WEB_JOB_ENDPOINT_URL {cpp_quoted(web_job_endpoint_url)}",
             f"#define WEB_JOB_API_KEY {cpp_quoted(web_job_api_key)}",
             f"#define WEB_JOB_TIMEOUT_MS {web_job_timeout_ms}",
+            f"#define IMAGE_PROVIDER {cpp_quoted(image_provider)}",
+            f"#define IMAGE_API_KEY {cpp_quoted(image_api_key)}",
             "",
             "#endif",
             "",
