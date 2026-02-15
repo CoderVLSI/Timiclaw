@@ -1,0 +1,4 @@
+.env
+.pio/
+.vscode/
+include/brain_secrets.generated.h
