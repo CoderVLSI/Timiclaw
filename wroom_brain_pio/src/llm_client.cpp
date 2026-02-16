@@ -850,3 +850,186 @@ bool llm_understand_media(const String &instruction, const String &mime_type,
   }
   return true;
 }
+
+namespace {
+
+static String extract_json_value(const String &json, const String &key) {
+  String search_key = "\"" + key + "\":\"";
+  int key_start = json.indexOf(search_key);
+  if (key_start < 0) {
+    return "";
+  }
+
+  int value_start = key_start + search_key.length();
+  if (value_start >= json.length()) {
+    return "";
+  }
+
+  int value_end = value_start;
+  while (value_end < json.length()) {
+    char c = json[value_end];
+    if (c == '\\' && value_end + 1 < json.length()) {
+      value_end += 2;  // Skip escaped character
+    } else if (c == '"') {
+      break;
+    } else {
+      value_end++;
+    }
+  }
+
+  if (value_end >= json.length() || json[value_end] != '"') {
+    return "";
+  }
+
+  return json.substring(value_start, value_end);
+}
+
+}  // namespace
+
+bool llm_parse_email_request(const String &message, String &to_out, String &subject_out,
+                             String &body_out, String &error_out) {
+  if (message.length() == 0) {
+    error_out = "Empty message";
+    return false;
+  }
+
+  const String provider = to_lower(String(LLM_PROVIDER));
+  const String api_key = String(LLM_API_KEY);
+
+  if (api_key.length() == 0) {
+    error_out = "Missing LLM_API_KEY";
+    return false;
+  }
+
+  String url;
+  String headers;
+  String body;
+
+  // Build request based on provider
+  if (provider == "glm" || provider == "zhipu" || provider == "openai") {
+    // GLM and OpenAI-compatible format
+    url = join_url(String(LLM_GLM_BASE_URL), "/chat/completions");
+
+    const String system_prompt =
+        "Extract email details from the user's message. "
+        "Return ONLY in this exact JSON format (no markdown, no extra text):\n"
+        "{\"to\":\"email@example.com\",\"subject\":\"Email Subject\",\"body\":\"Email "
+        "body text\"}\n\n"
+        "Rules:\n"
+        "- If any field is missing or unclear, use empty string \"\"\n"
+        "- to: must be a valid email address\n"
+        "- subject: short and clear\n"
+        "- body: the main message content\n"
+        "- Return ONLY valid JSON, nothing else";
+
+    const String json_body =
+        String("{\"model\":\"") + String(LLM_MODEL) +
+        "\",\"messages\":[{\"role\":\"system\",\"content\":\"" + json_escape(system_prompt) +
+        "\"},{\"role\":\"user\",\"content\":\"" + json_escape(message) + "\"}]}";
+
+    const HttpResult res = http_post_json(url, json_body, "Authorization", "Bearer " + api_key);
+
+    if (res.status_code < 200 || res.status_code >= 300) {
+      error_out = "LLM HTTP " + String(res.status_code);
+      return false;
+    }
+
+    String response;
+    if (!parse_response_text(res.body, response)) {
+      error_out = "Could not parse LLM response";
+      return false;
+    }
+
+    // Parse JSON response
+    String json_str = response;
+    to_out = extract_json_value(json_str, "to");
+    subject_out = extract_json_value(json_str, "subject");
+    body_out = extract_json_value(json_str, "body");
+
+    if (to_out.length() == 0) {
+      error_out = "Could not extract email address from response";
+      return false;
+    }
+
+    return true;
+  }
+
+  if (provider == "gemini" || provider == "anthropic") {
+    // Gemini and Anthropic format (media understanding endpoint)
+    if (provider == "gemini") {
+      url = String("https://generativelanguage.googleapis.com/v1beta/models/") +
+             String(LLM_MODEL) + ":generateContent?key=" + api_key;
+    } else {
+      url = join_url(String(LLM_ANTHROPIC_BASE_URL), "/v1/messages");
+    }
+
+    const String prompt =
+        "Extract email details from: \"" + message + "\"\n"
+        "Return ONLY this JSON format: {\"to\":\"email\",\"subject\":\"subject\",\"body\":\"body\"}\n"
+        "Use empty string \"\" for missing fields.";
+
+    if (provider == "gemini") {
+      const String json_body =
+          String("{\"contents\":[{\"parts\":[{\"text\":\"" + json_escape(prompt) + "\"}]}]}");
+      const HttpResult res = http_post_json(url, json_body);
+
+      if (res.status_code < 200 || res.status_code >= 300) {
+        error_out = "Gemini HTTP " + String(res.status_code);
+        return false;
+      }
+
+      String response;
+      if (!parse_response_text(res.body, response)) {
+        error_out = "Could not parse Gemini response";
+        return false;
+      }
+
+      String json_str = response;
+      to_out = extract_json_value(json_str, "to");
+      subject_out = extract_json_value(json_str, "subject");
+      body_out = extract_json_value(json_str, "body");
+
+      if (to_out.length() == 0) {
+        error_out = "Could not extract email from response";
+        return false;
+      }
+
+      return true;
+    }
+
+    // Anthropic
+    const String json_body =
+        String("{\"model\":\"claude-3-haiku-20240307\",\"max_tokens\":1024,") +
+        "\"messages\":[{\"role\":\"user\",\"content\":\"" + json_escape(prompt) + "\"}]}";
+
+    const HttpResult res = http_post_json(url, json_body, "x-api-key",
+                                           "sk-ant-" + api_key);
+
+    if (res.status_code < 200 || res.status_code >= 300) {
+      error_out = "Anthropic HTTP " + String(res.status_code);
+      return false;
+    }
+
+    String response;
+    if (!parse_response_text(res.body, response)) {
+      error_out = "Could not parse Anthropic response";
+      return false;
+    }
+
+    String json_str = response;
+    to_out = extract_json_value(json_str, "to");
+    subject_out = extract_json_value(json_str, "subject");
+    body_out = extract_json_value(json_str, "body");
+
+    if (to_out.length() == 0) {
+      error_out = "Could not extract email from response";
+      return false;
+    }
+
+    return true;
+  }
+
+  error_out = "Email parsing not supported for provider: " + provider;
+  return false;
+}
+

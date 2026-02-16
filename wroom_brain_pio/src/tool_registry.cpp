@@ -14,6 +14,7 @@
 #include "task_store.h"
 #include "transport_telegram.h"
 #include "web_job_client.h"
+#include "email_client.h"
 
 namespace {
 
@@ -169,6 +170,7 @@ void build_help_text(String &out) {
       "timezone_show | timezone_set <Zone> | timezone_clear\n"
       "task_add <text> | task_list | task_done <id> | task_clear\n"
       "email_draft <to>|<subject>|<body> | email_show | email_clear\n"
+      "send_email <to> <subject> <message>\n"
       "safe_mode | safe_mode_on | safe_mode_off\n"
       "logs | logs_clear\n"
       "time_show\n"
@@ -191,6 +193,12 @@ String wifi_health_line() {
     return "connected ip=" + WiFi.localIP().toString() + " rssi=" + String(WiFi.RSSI());
   }
   return "disconnected";
+}
+
+static bool looks_like_email_request(const String &text_lc) {
+  return (text_lc.indexOf("email") >= 0 || text_lc.indexOf("send") >= 0 ||
+          text_lc.indexOf("mail") >= 0) &&
+          (text_lc.indexOf("to") >= 0 || text_lc.indexOf("@") >= 0);
 }
 
 }  // namespace
@@ -1209,6 +1217,26 @@ bool tool_registry_execute(const String &input, String &out) {
       clear_pending_reminder_tz();
       return true;
     }
+  }
+
+  if (looks_like_email_request(cmd_lc) && !cmd_lc.startsWith("send_email ") &&
+      !cmd_lc.startsWith("email_")) {
+    String to, subject, body, llm_err;
+    if (llm_parse_email_request(cmd, to, subject, body, llm_err)) {
+      if (to.length() > 0) {
+        String email_err;
+        String html_content = "<p>" + body + "</p>";
+
+        if (email_send(to, subject, html_content, body, email_err)) {
+          out = "OK: Email sent to " + to;
+          return true;
+        } else {
+          out = "ERR: " + email_err;
+          return true;
+        }
+      }
+    }
+    // If LLM parsing failed, fall through to normal command processing
   }
 
   if (cmd_lc == "help") {
@@ -2410,6 +2438,53 @@ bool tool_registry_execute(const String &input, String &out) {
       return true;
     }
     out = "OK: configuration cleared for " + provider;
+    return true;
+  }
+
+  if (cmd_lc.startsWith("send_email ") || cmd_lc.startsWith("send_email ")) {
+    String remaining = cmd.length() > 10 ? cmd.substring(10) : "";
+    remaining.trim();
+
+    // Parse: send_email <to> <subject> <message>
+    int first_space = remaining.indexOf(' ');
+    if (first_space < 0) {
+      out = "ERR: usage send_email <to> <subject> <message>";
+      return true;
+    }
+
+    String to = remaining.substring(0, first_space);
+    to.trim();
+
+    String after_to = remaining.substring(first_space + 1);
+    after_to.trim();
+
+    int second_space = after_to.indexOf(' ');
+    if (second_space < 0) {
+      out = "ERR: usage send_email <to> <subject> <message>";
+      return true;
+    }
+
+    String subject = after_to.substring(0, second_space);
+    subject.trim();
+
+    String message = after_to.substring(second_space + 1);
+    message.trim();
+
+    if (to.length() == 0 || subject.length() == 0) {
+      out = "ERR: usage send_email <to> <subject> <message>";
+      return true;
+    }
+
+    String err;
+    String html_content = "<p>" + message + "</p>";
+    String text_content = message;
+
+    if (!email_send(to, subject, html_content, text_content, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+
+    out = "OK: Email sent to " + to;
     return true;
   }
 

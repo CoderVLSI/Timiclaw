@@ -72,6 +72,26 @@
 #define IMAGE_API_KEY ""
 #endif
 
+// Email sending provider (resend or sendgrid)
+#ifndef EMAIL_PROVIDER
+#define EMAIL_PROVIDER "resend"
+#endif
+
+// Common from email for all providers
+#ifndef EMAIL_FROM
+#define EMAIL_FROM "onboarding@resend.dev"
+#endif
+
+// Resend API
+#ifndef RESEND_API_KEY
+#define RESEND_API_KEY ""
+#endif
+
+// SendGrid API
+#ifndef SENDGRID_API_KEY
+#define SENDGRID_API_KEY ""
+#endif
+
 #ifndef MEMORY_MAX_CHARS
 #define MEMORY_MAX_CHARS 5000
 #endif
