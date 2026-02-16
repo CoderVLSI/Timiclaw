@@ -502,6 +502,45 @@ static bool parse_natural_daily_reminder(const String &input, String &hhmm_out, 
   return true;
 }
 
+static bool parse_natural_reminder_time_change(const String &input, String &hhmm_out) {
+  String text = input;
+  text.trim();
+  if (text.length() == 0) {
+    return false;
+  }
+
+  String lc = compact_spaces(text);
+  lc.toLowerCase();
+
+  const bool has_change_word =
+      (lc.indexOf("change") >= 0) || (lc.indexOf("reschedule") >= 0) ||
+      (lc.indexOf("move") >= 0) || (lc.indexOf("shift") >= 0) ||
+      (lc.indexOf("instead") >= 0) || (lc.indexOf("update") >= 0);
+  if (!has_change_word) {
+    return false;
+  }
+
+  // Require a reference like "change it to ...", "reschedule reminder ...", etc.
+  const bool mentions_target =
+      (lc.indexOf("reminder") >= 0) || (lc.indexOf(" it ") >= 0) ||
+      lc.startsWith("it ") || lc.startsWith("no change it") ||
+      (lc.indexOf(" time ") >= 0);
+  if (!mentions_target) {
+    return false;
+  }
+
+  int hh = -1;
+  int mm = -1;
+  if (!parse_time_from_natural(lc, hh, mm)) {
+    return false;
+  }
+
+  char hhmm_buf[6];
+  snprintf(hhmm_buf, sizeof(hhmm_buf), "%02d:%02d", hh, mm);
+  hhmm_out = String(hhmm_buf);
+  return true;
+}
+
 static String effective_timezone_for_jobs() {
   String tz = String(TIMEZONE_TZ);
   String stored_tz;
@@ -1572,6 +1611,39 @@ bool tool_registry_execute(const String &input, String &out) {
       event_log_append("REMINDER set daily " + hhmm);
     }
     out = "OK: daily reminder set at " + hhmm + "\nMessage: " + reminder_message_for_user(message);
+    return true;
+  }
+
+  String changed_hhmm;
+  if (parse_natural_reminder_time_change(cmd, changed_hhmm)) {
+    String old_hhmm;
+    String old_message;
+    String err;
+    if (!persona_get_daily_reminder(old_hhmm, old_message, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    old_hhmm.trim();
+    old_message.trim();
+    if (old_hhmm.length() == 0 || old_message.length() == 0) {
+      out = "ERR: daily reminder is empty";
+      return true;
+    }
+
+    if (!persona_set_daily_reminder(changed_hhmm, old_message, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+
+    if (is_webjob_message(old_message)) {
+      event_log_append("WEBJOB set daily " + changed_hhmm);
+      out = "OK: daily web job changed to " + changed_hhmm +
+            "\nTask: " + webjob_task_from_message(old_message);
+    } else {
+      event_log_append("REMINDER set daily " + changed_hhmm);
+      out = "OK: daily reminder changed to " + changed_hhmm +
+            "\nMessage: " + old_message;
+    }
     return true;
   }
 
