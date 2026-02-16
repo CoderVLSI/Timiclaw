@@ -7,8 +7,6 @@
 namespace {
 
 static const unsigned long kStartupBlinkMs = 90;
-static const unsigned long kIdlePulseMs = 60;
-static const unsigned long kIdlePeriodMs = 3500;
 static const unsigned long kErrorBlinkMs = 120;
 static const int kErrorPulseCount = 3;
 
@@ -17,7 +15,6 @@ bool s_led_on = false;
 bool s_error_pending = false;
 int s_error_pulses_remaining = 0;
 unsigned long s_last_transition_ms = 0;
-unsigned long s_next_idle_pulse_ms = 0;
 
 void led_write(bool on) {
   pinMode(BLUE_LED_PIN, OUTPUT);
@@ -51,7 +48,6 @@ void status_led_init() {
   }
 
   s_last_transition_ms = millis();
-  s_next_idle_pulse_ms = s_last_transition_ms + 800;
 }
 
 void status_led_tick() {
@@ -74,24 +70,12 @@ void status_led_tick() {
       led_write(false);
       s_last_transition_ms = now;
       s_error_pulses_remaining--;
-      if (s_error_pulses_remaining == 0) {
-        s_next_idle_pulse_ms = now + 1000;
-      }
     }
     return;
   }
 
   if (s_led_on) {
-    if ((long)(now - s_last_transition_ms) >= (long)kIdlePulseMs) {
-      led_write(false);
-    }
-    return;
-  }
-
-  if ((long)(now - s_next_idle_pulse_ms) >= 0) {
-    led_write(true);
-    s_last_transition_ms = now;
-    s_next_idle_pulse_ms = now + kIdlePeriodMs;
+    led_write(false);
   }
 }
 
@@ -110,7 +94,6 @@ void status_led_set_busy(bool busy) {
 
   led_write(false);
   s_last_transition_ms = millis();
-  s_next_idle_pulse_ms = s_last_transition_ms + 600;
   if (s_error_pending) {
     start_error_pattern();
   }

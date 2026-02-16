@@ -38,6 +38,12 @@ String to_lower(String value) {
   return value;
 }
 
+bool contains_ci(const String &text, const char *needle_lower) {
+  String hay = text;
+  hay.toLowerCase();
+  return hay.indexOf(needle_lower) >= 0;
+}
+
 String join_url(const String &base, const String &path) {
   if (base.endsWith("/") && path.startsWith("/")) {
     return base.substring(0, base.length() - 1) + path;
@@ -225,6 +231,50 @@ bool parse_response_text(const String &body, String &text) {
   }
 
   return false;
+}
+
+bool extract_json_string_field_after_anchor(const String &body, const char *anchor,
+                                            const char *field_name, String &out) {
+  const int anchor_pos = body.indexOf(anchor);
+  if (anchor_pos < 0) {
+    return false;
+  }
+  return extract_json_string_field(body.substring(anchor_pos), field_name, out);
+}
+
+String summarize_http_error(const String &label, const HttpResult &res) {
+  if (res.status_code <= 0) {
+    if (res.error.length() > 0) {
+      return label + " network error: " + res.error;
+    }
+    return label + " request failed";
+  }
+
+  String msg;
+  if (extract_json_string_field(res.body, "message", msg) && msg.length() > 0) {
+    msg.replace('\n', ' ');
+    msg.replace('\r', ' ');
+    if (msg.length() > 160) {
+      msg = msg.substring(0, 160);
+    }
+    String suffix = "";
+    if (res.status_code == 429 || contains_ci(msg, "quota")) {
+      suffix = " (quota/rate limit)";
+    } else if (contains_ci(msg, "billed users") || contains_ci(msg, "billing")) {
+      suffix = " (billing required)";
+    } else if (res.status_code == 404 || contains_ci(msg, "not found")) {
+      suffix = " (model unavailable)";
+    }
+    return label + " HTTP " + String(res.status_code) + ": " + msg + suffix;
+  }
+
+  if (res.status_code == 429) {
+    return label + " HTTP 429 (quota/rate limit)";
+  }
+  if (res.status_code == 404) {
+    return label + " HTTP 404 (model unavailable)";
+  }
+  return label + " HTTP " + String(res.status_code);
 }
 
 bool call_openai_like(const String &base_url, const String &api_key, const String &model,
@@ -525,16 +575,27 @@ bool llm_route_tool_command(const String &message, String &command_out, String &
 }
 
 bool llm_generate_image(const String &prompt, String &base64_out, String &error_out) {
-  const String provider = to_lower(String(IMAGE_PROVIDER));
-  const String api_key = String(IMAGE_API_KEY);
+  String provider = to_lower(String(IMAGE_PROVIDER));
+  String api_key = String(IMAGE_API_KEY);
+
+  // Backward-compatible fallback: if IMAGE_* are not configured, reuse LLM provider/key.
+  if (provider == "none" || provider.length() == 0) {
+    const String llm_provider = to_lower(String(LLM_PROVIDER));
+    if (llm_provider == "gemini" || llm_provider == "openai") {
+      provider = llm_provider;
+    }
+  }
+  if (api_key.length() == 0) {
+    api_key = String(LLM_API_KEY);
+  }
 
   if (provider != "gemini" && provider != "openai") {
-    error_out = "Image generation requires IMAGE_PROVIDER=gemini or openai in .env";
+    error_out = "Image generation requires IMAGE_PROVIDER=gemini/openai (or LLM_PROVIDER fallback)";
     return false;
   }
 
   if (api_key.length() == 0) {
-    error_out = "Missing IMAGE_API_KEY in .env";
+    error_out = "Missing IMAGE_API_KEY (or LLM_API_KEY fallback)";
     return false;
   }
 
@@ -544,22 +605,72 @@ bool llm_generate_image(const String &prompt, String &base64_out, String &error_
   }
 
   if (provider == "gemini") {
-    const String url = String("https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=") + api_key;
-    const String body = String("{\"instances\":[{\"prompt\":\"") + json_escape(prompt) +
-                        "\"}],\"parameters\":{\"sampleCount\":1}}";
+    const String gemini_base = String(LLM_GEMINI_BASE_URL);
+    String last_err = "";
 
-    const HttpResult res = http_post_json(url, body);
-    if (res.status_code < 200 || res.status_code >= 300) {
-      error_out = "Imagen HTTP " + String(res.status_code);
-      return false;
+    // Native Gemini image generation models (docs + backward compatibility).
+    const char *native_models[] = {
+        "gemini-2.5-flash-image",
+        "gemini-3-pro-image-preview",
+        "gemini-2.0-flash-exp-image-generation",
+    };
+
+    for (size_t i = 0; i < (sizeof(native_models) / sizeof(native_models[0])); i++) {
+      const String model = String(native_models[i]);
+      const String gen_url =
+          join_url(gemini_base, String("/v1beta/models/") + model + ":generateContent");
+      const String gen_body =
+          String("{\"contents\":[{\"parts\":[{\"text\":\"") + json_escape(prompt) +
+          "\"}]}],\"generationConfig\":{\"responseModalities\":[\"TEXT\",\"IMAGE\"]}}";
+
+      const HttpResult gen_res =
+          http_post_json(gen_url, gen_body, "x-goog-api-key", api_key);
+      if (gen_res.status_code >= 200 && gen_res.status_code < 300) {
+        if (extract_json_string_field_after_anchor(gen_res.body, "\"inlineData\"", "data",
+                                                   base64_out) ||
+            extract_json_string_field_after_anchor(gen_res.body, "\"inline_data\"", "data",
+                                                   base64_out) ||
+            extract_json_string_field(gen_res.body, "data", base64_out)) {
+          return true;
+        }
+        last_err = "Could not parse Gemini image response";
+        continue;
+      }
+
+      last_err = summarize_http_error("Gemini image", gen_res);
+      if (gen_res.status_code == 401) {
+        error_out = last_err;
+        return false;
+      }
     }
 
-    if (!extract_json_string_field(res.body, "bytesBase64Encoded", base64_out)) {
+    // Optional Imagen endpoint (requires billed access in many projects).
+    const String imagen_url =
+        join_url(gemini_base, "/v1beta/models/imagen-4.0-generate-001:predict");
+    const String imagen_body = String("{\"instances\":[{\"prompt\":\"") + json_escape(prompt) +
+                               "\"}],\"parameters\":{\"sampleCount\":1}}";
+
+    const HttpResult imagen_res =
+        http_post_json(imagen_url, imagen_body, "x-goog-api-key", api_key);
+    if (imagen_res.status_code >= 200 && imagen_res.status_code < 300) {
+      if (extract_json_string_field(imagen_res.body, "bytesBase64Encoded", base64_out)) {
+        return true;
+      }
       error_out = "Could not parse Imagen response";
       return false;
     }
 
-    return true;
+    const String imagen_err = summarize_http_error("Imagen", imagen_res);
+    if (last_err.length() == 0) {
+      error_out = imagen_err;
+      return false;
+    }
+    if (contains_ci(last_err, "quota") || contains_ci(last_err, "billing")) {
+      error_out = last_err;
+      return false;
+    }
+    error_out = imagen_err;
+    return false;
   }
 
   if (provider == "openai") {
@@ -581,6 +692,6 @@ bool llm_generate_image(const String &prompt, String &base64_out, String &error_
     return true;
   }
 
-  error_out = "Image generation requires IMAGE_PROVIDER=gemini or openai in .env";
+  error_out = "Image generation requires IMAGE_PROVIDER=gemini/openai (or LLM_PROVIDER fallback)";
   return false;
 }
