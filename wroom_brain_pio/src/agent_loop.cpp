@@ -6,6 +6,7 @@
 #include "chat_history.h"
 #include "memory_store.h"
 #include "llm_client.h"
+#include "model_config.h"
 #include "persona_store.h"
 #include "event_log.h"
 #include "status_led.h"
@@ -135,6 +136,7 @@ void agent_loop_init() {
   event_log_init();
   chat_history_init();
   memory_init();
+  model_config_init();
   persona_init();
   task_store_init();
   tool_registry_init();

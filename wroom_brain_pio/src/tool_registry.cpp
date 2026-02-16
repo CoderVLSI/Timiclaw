@@ -4,9 +4,11 @@
 #include <WiFi.h>
 
 #include "brain_config.h"
+#include "chat_history.h"
 #include "event_log.h"
 #include "llm_client.h"
 #include "memory_store.h"
+#include "model_config.h"
 #include "persona_store.h"
 #include "scheduler.h"
 #include "task_store.h"
@@ -156,6 +158,7 @@ void build_help_text(String &out) {
       "status\n"
       "help\n"
       "health\n"
+      "specs\n"
       "relay_set <pin> <0|1> (requires confirm)\n"
       "flash_led [1-20] (requires confirm)\n"
       "reminder_set_daily <HH:MM> <message>\n"
@@ -178,7 +181,9 @@ void build_help_text(String &out) {
       "plan <task>\n"
       "remember <note>\n"
       "memory\n"
-      "forget";
+      "forget\n"
+      "model list | model status | model use <provider>\n"
+      "model set <provider> <api_key> | model clear <provider>";
 }
 
 String wifi_health_line() {
@@ -193,14 +198,15 @@ String wifi_health_line() {
 void tool_registry_init() {
   Serial.println(
       "[tools] allowlist: status, relay_set <pin> <0|1>, sensor_read <pin>, "
-      "flash_led [count], help, health, confirm, cancel, plan <task>, "
+      "flash_led [count], help, health, specs, confirm, cancel, plan <task>, "
       "reminder_set_daily/reminder_show/reminder_clear, timezone_show/timezone_set/timezone_clear, "
       "webjob_set_daily/webjob_show/webjob_run/webjob_clear, "
       "web_files_make, "
       "task_add/task_list/task_done/task_clear, "
       "email_draft/email_show/email_clear, safe_mode, logs, time_show, "
       "soul_show/soul_set/soul_clear, heartbeat_show/heartbeat_set/heartbeat_clear, "
-      "remember <note>, memory, forget, generate_image <prompt>");
+      "remember <note>, memory, forget, generate_image <prompt>, "
+      "model list/model status/model use/model set/model clear");
 }
 
 static bool parse_two_ints(const String &s, const char *fmt, int *a, int *b) {
@@ -1000,6 +1006,139 @@ static int parse_led_flash_count(const String &cmd_lc) {
   return 0;
 }
 
+static bool text_has_any(const String &text_lc, const char *const terms[], size_t term_count) {
+  for (size_t i = 0; i < term_count; i++) {
+    if (text_lc.indexOf(terms[i]) >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool is_pdf_summary_request(const String &cmd_lc) {
+  const char *doc_terms[] = {
+      "pdf",
+      "document",
+      "doc file",
+      "report",
+  };
+  const char *summary_terms[] = {
+      "summar",
+      "tldr",
+      "tl;dr",
+      "key points",
+      "highlights",
+      "gist",
+      "explain this",
+      "review this",
+  };
+  return text_has_any(cmd_lc, doc_terms, sizeof(doc_terms) / sizeof(doc_terms[0])) &&
+         text_has_any(cmd_lc, summary_terms, sizeof(summary_terms) / sizeof(summary_terms[0]));
+}
+
+static bool is_image_understanding_request(const String &cmd_lc) {
+  const char *image_terms[] = {
+      "image",
+      "photo",
+      "picture",
+      "screenshot",
+      "diagram",
+  };
+  const char *understand_terms[] = {
+      "describe",
+      "what is",
+      "what's in",
+      "analy",
+      "explain",
+      "understand",
+      "ocr",
+      "extract text",
+      "read text",
+      "summar",
+  };
+  return text_has_any(cmd_lc, image_terms, sizeof(image_terms) / sizeof(image_terms[0])) &&
+         text_has_any(cmd_lc, understand_terms,
+                      sizeof(understand_terms) / sizeof(understand_terms[0]));
+}
+
+static bool extract_natural_image_prompt(const String &cmd, String &prompt_out) {
+  String raw = cmd;
+  raw.trim();
+  String lc = raw;
+  lc.toLowerCase();
+
+  const char *prefixes[] = {
+      "generate_image ",
+      "generate image ",
+      "generate an image of ",
+      "generate a photo of ",
+      "create an image of ",
+      "create image of ",
+      "make an image of ",
+      "make a poster of ",
+      "make a logo of ",
+      "draw ",
+  };
+
+  for (size_t i = 0; i < (sizeof(prefixes) / sizeof(prefixes[0])); i++) {
+    String p = String(prefixes[i]);
+    if (lc.startsWith(p)) {
+      String prompt = raw.substring(p.length());
+      prompt.trim();
+      if (prompt.length() > 0) {
+        prompt_out = prompt;
+        return true;
+      }
+      return false;
+    }
+  }
+
+  const bool has_image_noun = (lc.indexOf("image") >= 0) || (lc.indexOf("photo") >= 0) ||
+                              (lc.indexOf("poster") >= 0) || (lc.indexOf("logo") >= 0);
+  const bool has_generation_verb = lc.startsWith("generate ") || lc.startsWith("create ") ||
+                                   lc.startsWith("make ") || lc.startsWith("draw ");
+
+  if (has_image_noun && has_generation_verb) {
+    prompt_out = raw;
+    return true;
+  }
+  return false;
+}
+
+static String build_media_instruction(const String &user_message, bool is_pdf_mode) {
+  String msg_lc = user_message;
+  msg_lc.toLowerCase();
+  if (is_pdf_mode) {
+    return String("Read this PDF and answer the user request clearly.\n"
+                  "Format with:\n"
+                  "TL;DR:\n"
+                  "Key Points:\n"
+                  "Action Items:\n"
+                  "Risks / Open Questions:\n"
+                  "If the document text is unreadable, say so clearly.\n"
+                  "User request: ") +
+           user_message;
+  }
+
+  if (msg_lc.indexOf("ocr") >= 0 || msg_lc.indexOf("extract text") >= 0 ||
+      msg_lc.indexOf("read text") >= 0) {
+    return String("Perform OCR on this image. Return:\n"
+                  "1) Exact extracted text\n"
+                  "2) Cleaned summary in 3 bullets\n"
+                  "3) Any uncertain words/regions.\n"
+                  "User request: ") +
+           user_message;
+  }
+
+  return String("Analyze this image and answer the user request.\n"
+                "Return concise output with:\n"
+                "Scene summary\n"
+                "Visible text (if any)\n"
+                "Actionable takeaways.\n"
+                "User request: ") +
+         user_message;
+}
+
 static String normalize_command(const String &input) {
   String cmd = input;
   cmd.trim();
@@ -1153,6 +1292,97 @@ bool tool_registry_execute(const String &input, String &out) {
         out += "\nreminder_daily=none";
       }
     }
+    return true;
+  }
+
+  if (cmd_lc == "specs") {
+    // Chip and flash info
+    out = "=== ESP32 Specs ===\n\n";
+    out += "Chip: " + String(ESP.getChipModel()) + "\n";
+    out += "Cores: " + String(ESP.getChipCores()) + "\n";
+    out += "CPU Frequency: " + String(ESP.getCpuFreqMHz()) + " MHz\n";
+    out += "Flash Size: " + String(ESP.getFlashChipSize() / 1024) + " KB\n";
+    out += "Sketch Size: " + String(ESP.getSketchSize() / 1024) + " KB\n";
+    out += "Free Sketch Space: " + String(ESP.getFreeSketchSpace() / 1024) + " KB\n\n";
+
+    // RAM info
+    out += "=== RAM ===\n";
+    out += "Free Heap: " + String(ESP.getFreeHeap()) + " bytes\n";
+    out += "Largest Free Block: " + String(ESP.getMaxAllocHeap()) + " bytes\n";
+    out += "Total Heap: " + String(ESP.getHeapSize()) + " bytes\n\n";
+
+    // PSRAM info (if available)
+    if (psramFound()) {
+      out += "=== PSRAM ===\n";
+      out += "PSRAM Total: " + String(ESP.getPsramSize()) + " bytes\n";
+      out += "PSRAM Free: " + String(ESP.getFreePsram()) + " bytes\n\n";
+    } else {
+      out += "=== PSRAM: Not Available ===\n\n";
+    }
+
+    // NVS Storage breakdown
+    out += "=== NVS Storage (61KB partition) ===\n";
+    out += "Used / Limit:\n\n";
+
+    // Memory
+    String mem;
+    String mem_err;
+    if (memory_get_notes(mem, mem_err)) {
+      size_t used = mem.length();
+      size_t limit = MEMORY_MAX_CHARS;
+      int percent = (used * 100) / limit;
+      out += "memory: " + String(used) + " / " + String(limit) + " chars (" + String(percent) + "%)\n";
+    } else {
+      out += "memory: Error\n";
+    }
+
+    // Chat history
+    String chat;
+    String chat_err;
+    if (chat_history_get(chat, chat_err)) {
+      size_t used = chat.length();
+      size_t lines = 0;
+      for (size_t i = 0; i < chat.length(); i++) {
+        if (chat[i] == '\n') lines++;
+      }
+      out += "chat_history: " + String(lines) + " lines, " + String(used) + " chars\n";
+    } else {
+      out += "chat_history: " + String(chat_err) + "\n";
+    }
+
+    // Persona (soul + heartbeat)
+    String soul, heartbeat, persona_err;
+    size_t persona_used = 0;
+    if (persona_get_soul(soul, persona_err)) {
+      persona_used += soul.length();
+    }
+    if (persona_get_heartbeat(heartbeat, persona_err)) {
+      persona_used += heartbeat.length();
+    }
+    out += "persona: " + String(persona_used) + " chars used\n";
+
+    // Tasks
+    String tasks, tasks_err;
+    if (task_list(tasks, tasks_err)) {
+      size_t used = tasks.length();
+      size_t limit = TASKS_MAX_CHARS;
+      int percent = (used * 100) / limit;
+      out += "tasks: " + String(used) + " / " + String(limit) + " chars (" + String(percent) + "%)\n";
+    } else {
+      out += "tasks: " + tasks_err + "\n";
+    }
+
+    // Model config
+    String active_provider = model_config_get_active_provider();
+    out += "\n=== LLM Config ===\n";
+    out += "Active Provider: " + (active_provider.length() > 0 ? active_provider : "(none)") + "\n";
+    out += "Configured: " + model_config_get_configured_list() + "\n";
+
+    // WiFi
+    out += "\n=== WiFi ===\n";
+    out += wifi_health_line() + "\n";
+    out += "RSSI: " + String(WiFi.RSSI()) + " dBm\n";
+
     return true;
   }
 
@@ -2064,6 +2294,122 @@ bool tool_registry_execute(const String &input, String &out) {
     }
 
     out = "Image generated and sent";
+    return true;
+  }
+
+  if (cmd_lc.indexOf("summarize") >= 0 || cmd_lc.indexOf("analyse") >= 0 ||
+      cmd_lc.indexOf("analyze") >= 0 || cmd_lc.indexOf("describe") >= 0 ||
+      cmd_lc.indexOf("explain") >= 0 || cmd_lc.indexOf("read this") >= 0 ||
+      cmd_lc.startsWith("what is in") || cmd_lc.startsWith("what's in")) {
+    
+    // Check for document first (PDFs etc)
+    String doc_name, doc_mime, doc_b64, doc_err;
+    if (transport_telegram_get_last_document_base64(doc_name, doc_mime, doc_b64, doc_err)) {
+      String reply, llm_err;
+      out = "Analyzing document: " + doc_name + "...";
+      if (llm_understand_media(cmd, doc_mime, doc_b64, reply, llm_err)) {
+        out = "Document Analysis (" + doc_name + "):\n" + reply;
+        return true;
+      }
+      out = "ERR: " + llm_err;
+      return true;
+    }
+
+    // Check for photo second
+    String photo_mime, photo_b64, photo_err;
+    if (transport_telegram_get_last_photo_base64(photo_mime, photo_b64, photo_err)) {
+      String reply, llm_err;
+      out = "Analyzing photo...";
+      if (llm_understand_media(cmd, photo_mime, photo_b64, reply, llm_err)) {
+        out = "Photo Analysis:\n" + reply;
+        return true;
+      }
+      out = "ERR: " + llm_err;
+      return true;
+    }
+    
+    // Fall through if no media found (might be normal text chat)
+  }
+
+  // Model management commands
+  if (cmd_lc == "model list" || cmd_lc == "model_list") {
+    String configured = model_config_get_configured_list();
+    out = "Configured providers:\n" + configured +
+          "\n\nUse: model use <provider> to switch";
+    return true;
+  }
+
+  if (cmd_lc == "model status" || cmd_lc == "model_status") {
+    out = model_config_get_status_summary();
+    return true;
+  }
+
+  if (cmd_lc.startsWith("model use ") || cmd_lc.startsWith("model_use ")) {
+    String provider = cmd.length() > 9 ? cmd.substring(9) : "";
+    provider.trim();
+    if (provider.length() == 0) {
+      out = "ERR: usage model use <provider>\nProviders: openai, anthropic, gemini, glm";
+      return true;
+    }
+    if (!model_config_is_provider_configured(provider)) {
+      out = "ERR: provider '" + provider + "' not configured.\n"
+            "Use: model set " + provider + " <your_api_key>";
+      return true;
+    }
+    String err;
+    if (!model_config_set_active_provider(provider, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    String model = model_config_get_model(provider);
+    out = "OK: switched to " + provider + " (" + model + ")";
+    return true;
+  }
+
+  if (cmd_lc.startsWith("model set ") || cmd_lc.startsWith("model_set ")) {
+    String tail = cmd.length() > 9 ? cmd.substring(9) : "";
+    tail.trim();
+    if (tail.length() == 0) {
+      out = "ERR: usage model set <provider> <api_key>\nProviders: openai, anthropic, gemini, glm";
+      return true;
+    }
+    // Find first space to separate provider and key
+    int first_space = tail.indexOf(' ');
+    if (first_space < 0) {
+      out = "ERR: usage model set <provider> <api_key>";
+      return true;
+    }
+    String provider = tail.substring(0, first_space);
+    String api_key = tail.substring(first_space + 1);
+    provider.trim();
+    api_key.trim();
+    if (api_key.length() == 0) {
+      out = "ERR: API key cannot be empty";
+      return true;
+    }
+    String err;
+    if (!model_config_set_api_key(provider, api_key, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = "OK: API key saved for " + provider +
+          "\nUse: model use " + provider + " to activate";
+    return true;
+  }
+
+  if (cmd_lc.startsWith("model clear ") || cmd_lc.startsWith("model_clear ")) {
+    String provider = cmd.length() > 11 ? cmd.substring(11) : "";
+    provider.trim();
+    if (provider.length() == 0) {
+      out = "ERR: usage model clear <provider>";
+      return true;
+    }
+    String err;
+    if (!model_config_clear_provider(provider, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = "OK: configuration cleared for " + provider;
     return true;
   }
 

@@ -73,7 +73,7 @@
 #endif
 
 #ifndef MEMORY_MAX_CHARS
-#define MEMORY_MAX_CHARS 1800
+#define MEMORY_MAX_CHARS 5000
 #endif
 
 #ifndef BLUE_LED_PIN
@@ -129,7 +129,7 @@
 #endif
 
 #ifndef TASKS_MAX_CHARS
-#define TASKS_MAX_CHARS 2600
+#define TASKS_MAX_CHARS 8000
 #endif
 
 #ifndef WEB_SEARCH_API_KEY
