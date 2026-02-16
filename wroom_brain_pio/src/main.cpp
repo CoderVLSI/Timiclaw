@@ -11,7 +11,7 @@ void setup() {
 
   // Setup OTA updates
   ArduinoOTA.setHostname("wroom-brain");
-  ArduinoOTA.setPassword((const char *)WIFI_PASS);  // Use WiFi password as OTA password
+  // ArduinoOTA.setPassword((const char *)WIFI_PASS);  // Password disabled for OTA testing
 
   ArduinoOTA.onStart([]() {
     Serial.println("[ota] Start updating");

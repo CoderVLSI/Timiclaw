@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
+#include "agent_loop.h"
 #include "brain_config.h"
 #include "chat_history.h"
 #include "event_log.h"
@@ -177,6 +178,7 @@ void build_help_text(String &out) {
       "soul_show | soul_set <text> | soul_clear\n"
       "heartbeat_show | heartbeat_set <text> | heartbeat_clear\n"
       "generate_image <prompt>\n"
+      "email_code [to email]\n"
       "confirm [id]\n"
       "cancel\n"
       "sensor_read <pin>\n"
@@ -1224,6 +1226,10 @@ bool tool_registry_execute(const String &input, String &out) {
     String to, subject, body, llm_err;
     if (llm_parse_email_request(cmd, to, subject, body, llm_err)) {
       if (to.length() > 0) {
+        // Use default subject if LLM didn't provide one
+        if (subject.length() == 0) {
+          subject = "Message from ESP32 Bot";
+        }
         String email_err;
         String html_content = "<p>" + body + "</p>";
 
@@ -2322,6 +2328,48 @@ bool tool_registry_execute(const String &input, String &out) {
     }
 
     out = "Image generated and sent";
+    return true;
+  }
+
+  // email_code - emails the last generated code/response
+  if (cmd_lc.startsWith("email_code") || cmd_lc.startsWith("email the code") ||
+      cmd_lc.startsWith("send me the code") || cmd_lc.startsWith("mail me the code")) {
+    String last_response = agent_loop_get_last_response();
+    if (last_response.length() == 0) {
+      out = "ERR: No code to email. Ask me to generate something first.";
+      return true;
+    }
+
+    // Extract recipient from command (required)
+    String to = "";
+    if (cmd_lc.indexOf(" to ") >= 0) {
+      int to_idx = cmd_lc.indexOf(" to ");
+      to = cmd.substring(to_idx + 4);
+      to.trim();
+    } else {
+      out = "ERR: Usage: email_code to your@email.com";
+      return true;
+    }
+
+    // Try to extract code blocks from response
+    String code_content = last_response;
+    int code_start = code_content.indexOf("```");
+    if (code_start >= 0) {
+      int code_end = code_content.indexOf("```", code_start + 3);
+      if (code_end > code_start) {
+        // Extract just the code block
+        code_content = code_content.substring(code_start, code_end + 3);
+      }
+    }
+
+    // Create email
+    String subject = "Generated Code from ESP32 Bot";
+    String email_err;
+    if (email_send(to, subject, "", code_content, email_err)) {
+      out = "Code emailed to " + to;
+    } else {
+      out = "ERR: " + email_err;
+    }
     return true;
   }
 

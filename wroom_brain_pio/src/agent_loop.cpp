@@ -14,6 +14,17 @@
 #include "tool_registry.h"
 #include "transport_telegram.h"
 
+// Store last LLM response for emailing code
+static String s_last_llm_response = "";
+
+String agent_loop_get_last_response() {
+  return s_last_llm_response;
+}
+
+void agent_loop_set_last_response(const String &response) {
+  s_last_llm_response = response;
+}
+
 static bool is_internal_dispatch_message(const String &msg) {
   String lc = msg;
   lc.trim();
@@ -121,6 +132,9 @@ static void on_incoming_message(const String &msg) {
       send_and_record(msg, "ERR: " + err);
       return;
     }
+
+    // Store the full response for potential email_code command
+    s_last_llm_response = response;
 
     if (response.length() > 1400) {
       response = response.substring(0, 1400) + "...";
