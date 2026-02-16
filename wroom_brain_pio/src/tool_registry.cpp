@@ -7,6 +7,7 @@
 #include "event_log.h"
 #include "llm_client.h"
 #include "memory_store.h"
+#include "model_config.h"
 #include "persona_store.h"
 #include "scheduler.h"
 #include "task_store.h"
@@ -178,7 +179,9 @@ void build_help_text(String &out) {
       "plan <task>\n"
       "remember <note>\n"
       "memory\n"
-      "forget";
+      "forget\n"
+      "model list | model status | model use <provider>\n"
+      "model set <provider> <api_key> | model clear <provider>";
 }
 
 String wifi_health_line() {
@@ -200,7 +203,8 @@ void tool_registry_init() {
       "task_add/task_list/task_done/task_clear, "
       "email_draft/email_show/email_clear, safe_mode, logs, time_show, "
       "soul_show/soul_set/soul_clear, heartbeat_show/heartbeat_set/heartbeat_clear, "
-      "remember <note>, memory, forget, generate_image <prompt>");
+      "remember <note>, memory, forget, generate_image <prompt>, "
+      "model list/model status/model use/model set/model clear");
 }
 
 static bool parse_two_ints(const String &s, const char *fmt, int *a, int *b) {
@@ -2232,6 +2236,88 @@ bool tool_registry_execute(const String &input, String &out) {
     }
     
     // Fall through if no media found (might be normal text chat)
+  }
+
+  // Model management commands
+  if (cmd_lc == "model list" || cmd_lc == "model_list") {
+    String configured = model_config_get_configured_list();
+    out = "Configured providers:\n" + configured +
+          "\n\nUse: model use <provider> to switch";
+    return true;
+  }
+
+  if (cmd_lc == "model status" || cmd_lc == "model_status") {
+    out = model_config_get_status_summary();
+    return true;
+  }
+
+  if (cmd_lc.startsWith("model use ") || cmd_lc.startsWith("model_use ")) {
+    String provider = cmd.length() > 9 ? cmd.substring(9) : "";
+    provider.trim();
+    if (provider.length() == 0) {
+      out = "ERR: usage model use <provider>\nProviders: openai, anthropic, gemini, glm";
+      return true;
+    }
+    if (!model_config_is_provider_configured(provider)) {
+      out = "ERR: provider '" + provider + "' not configured.\n"
+            "Use: model set " + provider + " <your_api_key>";
+      return true;
+    }
+    String err;
+    if (!model_config_set_active_provider(provider, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    String model = model_config_get_model(provider);
+    out = "OK: switched to " + provider + " (" + model + ")";
+    return true;
+  }
+
+  if (cmd_lc.startsWith("model set ") || cmd_lc.startsWith("model_set ")) {
+    String tail = cmd.length() > 9 ? cmd.substring(9) : "";
+    tail.trim();
+    if (tail.length() == 0) {
+      out = "ERR: usage model set <provider> <api_key>\nProviders: openai, anthropic, gemini, glm";
+      return true;
+    }
+    // Find first space to separate provider and key
+    int first_space = tail.indexOf(' ');
+    if (first_space < 0) {
+      out = "ERR: usage model set <provider> <api_key>";
+      return true;
+    }
+    String provider = tail.substring(0, first_space);
+    String api_key = tail.substring(first_space + 1);
+    provider.trim();
+    api_key.trim();
+    if (api_key.length() == 0) {
+      out = "ERR: API key cannot be empty";
+      return true;
+    }
+    String err;
+    if (!model_config_set_api_key(provider, api_key, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = "OK: API key saved for " + provider +
+          "\nUse: model use " + provider + " to activate";
+    return true;
+  }
+
+  if (cmd_lc.startsWith("model clear ") || cmd_lc.startsWith("model_clear ")) {
+    String provider = cmd.length() > 11 ? cmd.substring(11) : "";
+    provider.trim();
+    if (provider.length() == 0) {
+      out = "ERR: usage model clear <provider>";
+      return true;
+    }
+    String err;
+    if (!model_config_clear_provider(provider, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = "OK: configuration cleared for " + provider;
+    return true;
   }
 
   return false;

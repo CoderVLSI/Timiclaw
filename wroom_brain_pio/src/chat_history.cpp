@@ -10,10 +10,10 @@ bool g_ready = false;
 
 const char *kNamespace = "brainchat";
 const char *kKeyLines = "lines";
-const int kMaxEntries = 6;      // 6 role-lines ~= 3 user/assistant turns.
-const int kMaxLineChars = 160;  // Keep each message compact.
-const int kMaxStoreChars = 1000;
-const int kMaxOutChars = 420;
+const int kMaxEntries = 30;     // 30 role-lines ~= 15 user/assistant turns.
+const int kMaxLineChars = 250;  // Longer messages allowed.
+const int kMaxStoreChars = 5000;
+const int kMaxOutChars = 2000;
 
 bool ensure_ready(String &error_out) {
   if (g_ready) {
