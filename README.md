@@ -1,4 +1,4 @@
-# MicroClaw
+# IOClaw
 <p align="center">
   <img src="assets/microclaw-banner.png" alt="MicroClaw banner" width="920" />
 </p>
