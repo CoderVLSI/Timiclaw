@@ -1,18 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pio run:*)",
-      "Bash(export:*)",
-      "Bash(git pull:*)",
-      "Bash(wmic:*)",
-      "Bash(powershell -Command \"Get-PSDrive C | Select-Object Used,Free | Format-Table -AutoSize\")",
-      "Bash(ls:*)",
-      "Bash(pio cache clean:*)",
-      "Bash(set:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)",
-      "Bash(pio:*)"
+      "Bash(git push:*)"
     ]
   }
 }

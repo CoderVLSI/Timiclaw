@@ -1,9 +1,9 @@
-# IOClaw
+# Timiclaw
 <p align="center">
-  <img src="assets/microclaw-banner.png" alt="MicroClaw banner" width="920" />
+  <img src="assets/timiclaw-banner.png" alt="Timiclaw banner" width="920" />
 </p>
 
-MicroClaw is an ESP32-based autonomous Telegram agent. It runs directly on-device, executes only allowlisted tools, supports optional LLM providers, and can schedule reminders/web jobs while keeping state in NVS.
+Timiclaw is an ESP32-based autonomous Telegram agent. It runs directly on-device, executes only allowlisted tools, supports optional LLM providers, and can schedule reminders/web jobs while keeping state in NVS.
 
 ## Overview
 
@@ -16,7 +16,7 @@ MicroClaw is an ESP32-based autonomous Telegram agent. It runs directly on-devic
 ## Repository Layout
 
 ```text
-microclaw/
+timiclaw/
 |-- README.md
 |-- wroom_brain/                 # ESP-IDF scaffold (early-stage)
 |   |-- main/

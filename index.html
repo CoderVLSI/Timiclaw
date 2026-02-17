@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timiclaw | Embedded AI Framework</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg: #050505;
+            --surface: #0a0a0a;
+            --surface-hover: #151515;
+            --border: #222;
+            --text-primary: #ffffff;
+            --text-secondary: #888888;
+            --accent: #FF5722;
+            /* Industrial Orange */
+            --accent-glow: rgba(255, 87, 34, 0.15);
+            --danger: #ff4d4d;
+            --warning: #ffd700;
+        }
+
+        /* [Previous CSS Base] */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        a {
+            text-decoration: none;
+            color: inherit;
+            transition: 0.2s;
+        }
+
+        ul {
+            list-style: none;
+        }
+
+        h1,
+        h2,
+        h3,
+        h4 {
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .text-gradient {
+            background: linear-gradient(135deg, #fff 0%, #888 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .container {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        section {
+            padding: 6rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            background: rgba(5, 5, 5, 0.9);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .nav-content {
+            height: 70px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.25rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo span {
+            color: var(--accent);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .btn-primary {
+            background: var(--text-primary);
+            color: #000;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn-primary:hover {
+            background: #ddd;
+        }
+
+        .hero {
+            height: 90vh;
+            display: flex;
+            align-items: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-bg {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 60%;
+            height: 100%;
+            background: radial-gradient(circle at 60% 50%, var(--accent-glow) 0%, transparent 60%), repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(34, 34, 34, 0.3) 10px, rgba(34, 34, 34, 0.3) 11px);
+            z-index: -1;
+            opacity: 0.6;
+            mask-image: linear-gradient(to right, transparent, black);
+            -webkit-mask-image: linear-gradient(to right, transparent, black);
+        }
+
+        .hero-content {
+            max-width: 650px;
+            z-index: 1;
+        }
+
+        .hero h1 {
+            font-size: 4rem;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+        }
+
+        .hero p {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            margin-bottom: 2.5rem;
+        }
+
+        .hero-stats {
+            display: flex;
+            gap: 3rem;
+            margin-top: 3rem;
+            border-top: 1px solid var(--border);
+            padding-top: 2rem;
+        }
+
+        .stat-item h4 {
+            font-size: 2rem;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-item p {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Terminals */
+        .terminal-window {
+            position: absolute;
+            right: 5%;
+            top: 20%;
+            width: 450px;
+            height: 500px;
+            background: rgba(10, 10, 10, 0.9);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            z-index: 2;
+        }
+
+        .terminal-header {
+            background: #1a1a1a;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #888;
+        }
+
+        .terminal-body {
+            flex-grow: 1;
+            padding: 1rem;
+            overflow-y: auto;
+            color: #ccc;
+        }
+
+        .msg {
+            margin-bottom: 1rem;
+            line-height: 1.4;
+        }
+
+        .msg.user {
+            color: var(--accent);
+        }
+
+        .msg.bot {
+            color: #fff;
+        }
+
+        .terminal-input {
+            padding: 1rem;
+            background: #151515;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+        }
+
+        .input-field {
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-family: inherit;
+            flex-grow: 1;
+            outline: none;
+        }
+
+        /* Comparison Table */
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 3rem;
+            background: var(--surface);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        .comparison-table th,
+        .comparison-table td {
+            text-align: left;
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .comparison-table th {
+            background: var(--surface-hover);
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            letter-spacing: 0.05em;
+        }
+
+        .comparison-table td:first-child {
+            font-weight: 600;
+            color: var(--text-primary);
+            border-right: 1px solid var(--border);
+        }
+
+        .comparison-table .highlight-col {
+            background: rgba(255, 87, 34, 0.03);
+            border-left: 2px solid var(--accent);
+            border-right: 2px solid var(--accent);
+            position: relative;
+        }
+
+        .comparison-table .highlight-col::after {
+            content: 'EMBEDDED';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.6rem;
+            background: var(--accent);
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 0 0 4px 4px;
+            font-weight: 700;
+        }
+
+        .check {
+            color: var(--accent);
+            font-weight: bold;
+        }
+
+        .cross {
+            color: var(--danger);
+            font-size: 0.9rem;
+            opacity: 0.5;
+        }
+
+        /* Grid & Cards */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+
+        .card {
+            background: var(--surface);
+            padding: 2rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            transition: 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            border-color: var(--accent);
+        }
+
+        .card-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        /* Install */
+        .installer-box {
+            background: #111;
+            padding: 2rem;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            text-align: center;
+            margin-top: 2rem;
+        }
+
+        .download-btn {
+            display: inline-block;
+            background: var(--accent);
+            color: #fff;
+            padding: 1rem 2rem;
+            font-weight: 700;
+            font-size: 1.1rem;
+            border-radius: 6px;
+            margin-top: 1rem;
+        }
+
+        footer {
+            padding: 4rem 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            border-top: 1px solid var(--border);
+            margin-top: 4rem;
+        }
+
+        @media (max-width: 1024px) {
+            .terminal-window {
+                display: none;
+            }
+
+            .hero-content {
+                max-width: 100%;
+                text-align: center;
+            }
+
+            .hero-stats {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <nav>
+        <div class="container nav-content">
+            <a href="#" class="logo">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                </svg>
+                Timiclaw <span class="mono">FRAMEWORK</span>
+            </a>
+            <div class="nav-links">
+                <a href="#comparison">Compare Frameworks</a>
+                <a href="#features">Architecture</a>
+                <a href="#install">Deploy</a>
+            </div>
+            <a href="https://github.com/CoderVLSI/timiclaw" class="btn-primary">GitHub</a>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <header class="hero">
+        <div class="hero-bg"></div>
+        <div class="container">
+            <div class="hero-content">
+                <div class="mono" style="color: var(--accent); margin-bottom: 1rem;">// ENV: EMBEDDED_AGENT</div>
+                <h1>The First <span class="text-gradient">Embedded Agent Framework.</span></h1>
+                <p>
+                    <strong>OpenClaw</strong> and <strong>PicoClaw</strong> dominate the desktop. <br>
+                    <strong>Timiclaw</strong> conquers the physical world.<br>
+                    Deploy autonomous agent frameworks directly to microcontrollers.
+                </p>
+                <div style="display: flex; gap: 1rem;">
+                    <a href="#install" class="btn-primary" style="background: var(--accent); color: #fff;">Get
+                        Framework</a>
+                    <a href="#comparison" class="btn-primary"
+                        style="background: transparent; border: 1px solid var(--border); color: #fff;">See
+                        Benchmarks</a>
+                </div>
+
+                <div class="hero-stats">
+                    <div class="stat-item">
+                        <h4>Secure</h4>
+                        <p>No OS Kernel</p>
+                    </div>
+                    <div class="stat-item">
+                        <h4>Real-Time</h4>
+                        <p>Hard RTOS</p>
+                    </div>
+                    <div class="stat-item">
+                        <h4>Scalable</h4>
+                        <p>Fleet Ready</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="terminal-window">
+            <div class="terminal-header">
+                <div style="display:flex; gap:8px;">
+                    <div style="width:12px;height:12px;border-radius:50%;background:#ff5f56;"></div>
+                    <div style="width:12px;height:12px;border-radius:50%;background:#ffbd2e;"></div>
+                    <div style="width:12px;height:12px;border-radius:50%;background:#27c93f;"></div>
+                </div>
+                <span>timiclaw@embedded-host ~</span>
+            </div>
+            <div class="terminal-body" id="term-body">
+                <div class="msg sys">Booting Framework v1.2... Done (800ms).</div>
+                <div class="msg bot">Framework Status: ACTIVE<br>Core: ESP32-WROOM<br>Agent: Connected (Gemini 2.0
+                    Flash)<br>Sensors: Ready.</div>
+            </div>
+            <div class="terminal-input">
+                <span class="prompt">$</span>
+                <input type="text" class="input-field" id="term-input" placeholder="Interact with Framework..."
+                    autocomplete="off">
+            </div>
+        </div>
+    </header>
+
+    <!-- Framework Comparison -->
+    <section id="comparison">
+        <div class="container">
+            <h2 class="text-gradient" style="font-size: 2.5rem; margin-bottom: 1rem;">Framework Landscape</h2>
+            <p style="color: var(--text-secondary); max-width: 600px; margin-bottom: 3rem;">
+                Where does Timiclaw fit in the AI Agent ecosystem?
+            </p>
+
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th>Specification</th>
+                        <th class="highlight-col" style="color: var(--accent);">Timiclaw</th>
+                        <th>OpenClaw</th>
+                        <th>PicoClaw</th>
+                        <th>NanoBot</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Framework Type</td>
+                        <td class="highlight-col"><span class="check">Embedded (C++)</span></td>
+                        <td>Desktop (Python)</td>
+                        <td>Desktop (Go)</td>
+                        <td>Lightweight (Python)</td>
+                    </tr>
+                    <tr>
+                        <td>Use Case</td>
+                        <td class="highlight-col"><strong>Physical Automation</strong></td>
+                        <td>Complete Assistant</td>
+                        <td>Fast CLI Assistant</td>
+                        <td>Experimental / Edu</td>
+                    </tr>
+                    <tr>
+                        <td>Hardware Target</td>
+                        <td class="highlight-col"><span class="check">Microcontrollers (ESP32)</span></td>
+                        <td>PC / Mac / VPS</td>
+                        <td>PC / Mac / Pi Zero</td>
+                        <td>PC / Mac</td>
+                    </tr>
+                    <tr>
+                        <td>Physical I/O</td>
+                        <td class="highlight-col"><span class="check">Native (GPIO)</span></td>
+                        <td><span class="cross">Via Plugins Only</span></td>
+                        <td><span class="cross">None</span></td>
+                        <td><span class="cross">None</span></td>
+                    </tr>
+                    <tr>
+                        <td>Memory Footprint</td>
+                        <td class="highlight-col"><span class="check">~200 KB RAM</span></td>
+                        <td>~500 MB RAM</td>
+                        <td>~10 MB RAM</td>
+                        <td>~50 MB RAM</td>
+                    </tr>
+                    <tr>
+                        <td>Boot Time</td>
+                        <td class="highlight-col"><span class="check">Instant (<1s)< /span>
+                        </td>
+                        <td>Slow (Python Import)</td>
+                        <td>Fast (~1s)</td>
+                        <td>Moderate</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Feature Grid 1: Voice & Communication -->
+    <section id="voice" style="background: var(--surface);">
+        <div class="container">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3rem;">
+                <h2 class="text-gradient" style="font-size: 2.5rem;">Voice Gateway</h2>
+                <div class="mono"
+                    style="background: #222; padding: 0.5rem 1rem; border-radius: 4px; color: var(--accent);">PRO
+                    FEATURE</div>
+            </div>
+            <div class="grid">
+                <div class="card">
+                    <div class="card-icon">🗣️</div>
+                    <h3>Neural Voice</h3>
+                    <p style="color: var(--text-secondary);">Powered by <strong>ElevenLabs</strong>. The agent speaks
+                        with ultra-realistic human intonation. No more robotic TTS.</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">📞</div>
+                    <h3>Emergency Uplink</h3>
+                    <p style="color: var(--text-secondary);"><strong>Twilio / SIP Integration.</strong> Can physically
+                        call your mobile number in critical events (Alarm, Fire, Intrusion).</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🎙️</div>
+                    <h3>Natural Conversation</h3>
+                    <p style="color: var(--text-secondary);">Send voice notes to the agent. It listens, understands via
+                        Whisper-1, and replies with voice.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Feature Grid 2: Desktop & Cloud (NEW) -->
+    <section id="desktop" style="background: var(--bg);">
+        <div class="container">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3rem;">
+                <h2 class="text-gradient" style="font-size: 2.5rem;">Desktop & Cloud Bridge</h2>
+                <div class="mono" style="background: #222; padding: 0.5rem 1rem; border-radius: 4px; color: #fff;">
+                    EXPANSION</div>
+            </div>
+            <div class="grid">
+                <div class="card">
+                    <div class="card-icon">⌨️</div>
+                    <h3>Driverless PC Control</h3>
+                    <p style="color: var(--text-secondary);">No scripts. No installs. Plug it in, and it acts as a
+                        <strong>Smart Keyboard</strong>. It types "Shutdown", "Lock", or "Mute" for you.
+                    </p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🌐</div>
+                    <h3>Web Browsing</h3>
+                    <p style="color: var(--text-secondary);">Delegate complex queries to the Cloud Brain. The agent can
+                        browse the web, summarize articles, and report back.</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🔐</div>
+                    <h3>Remote SSH</h3>
+                    <p style="color: var(--text-secondary);">Securely execute SSH commands on your servers via the
+                        agent. "Restart nginx on server 1" becomes a simple chat message.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Core Features -->
+    <section id="features">
+        <div class="container">
+            <h2 class="text-gradient" style="font-size: 2.5rem; margin-bottom: 3rem;">Embedded Advantages</h2>
+            <div class="grid">
+                <div class="card">
+                    <div class="card-icon">🔌</div>
+                    <h3>Direct Hardware Access</h3>
+                    <p style="color: var(--text-secondary);">Unlike desktop frameworks, Timiclaw speaks directly to
+                        voltage. Control relays, motors, and sensors with zero latency.</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🛡️</div>
+                    <h3>Zero Attack Surface</h3>
+                    <p style="color: var(--text-secondary);">Desktop frameworks inherit OS vulnerabilities. Timiclaw
+                        has no file system to ransomware, no shell to exploit.</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">⚡</div>
+                    <h3>Dedicated Function</h3>
+                    <p style="color: var(--text-secondary);">A desktop framework competes with Chrome for RAM. Timiclaw
+                        owns the entire chip. 100% focused on the task.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Install -->
+    <section id="install">
+        <div class="container" style="text-align: center;">
+            <h2 class="text-gradient" style="font-size: 2.5rem; margin-bottom: 2rem;">Get the Framework</h2>
+
+            <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;">
+                <div class="installer-box">
+                    <h3 style="color: #fff;">Source Code</h3>
+                    <p style="color: #666; font-size: 0.9rem; margin-top: 0.5rem;">C++ / PlatformIO Project</p>
+                    <a href="https://github.com/CoderVLSI/timiclaw" class="btn-primary"
+                        style="margin-top: 1.5rem; background: #333; color: #fff; text-decoration: none;">View on
+                        GitHub</a>
+                    <div style="font-size: 0.8rem; color: #555; margin-top: 0.5rem;">Apache 2.0 License</div>
+                </div>
+
+                <div class="installer-box" style="border-color: var(--accent);">
+                    <h3 style="color: var(--accent);">Binary Release</h3>
+                    <p style="color: #666; font-size: 0.9rem; margin-top: 0.5rem;">Pre-compiled Firmware</p>
+                    <a href="#" class="download-btn">Download v1.2.0</a>
+                    <div style="font-size: 0.8rem; color: #555; margin-top: 0.5rem;">ESP32-WROOM Compatible</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container" style="text-align: center;">
+            <p style="opacity: 0.5;">© 2026 Timiclaw Project. The Embedded Agent Framework.</p>
+        </div>
+    </footer>
+
+    <!-- Terminal Script -->
+    <script>
+        const input = document.getElementById('term-input');
+        const body = document.getElementById('term-body');
+        const responses = {
+            'status': 'Framework: ONLINE\nMode: Agent\nHeap: 124KB Free',
+            'help': 'Commands: gpio_write, sensor_read, status, pc_exec',
+            'gpio_write 14 1': 'GPIO 14 set to HIGH.',
+            'sensor_read': 'ADC1: 2405 (1.9V)',
+            'pc_exec shutdown': 'Sending USB COMMAND: shutdown -s -t 0\nWarning: Computer will shut down immediately.'
+        };
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const cmd = input.value.trim().toLowerCase();
+                if (!cmd) return;
+
+                const userDiv = document.createElement('div');
+                userDiv.className = 'msg user'; userDiv.innerText = '$ ' + cmd;
+                body.appendChild(userDiv);
+
+                setTimeout(() => {
+                    const botDiv = document.createElement('div');
+                    botDiv.className = 'msg bot';
+                    const resp = responses[cmd] || "Command not found. Try 'help'.";
+                    botDiv.innerText = resp;
+                    body.appendChild(botDiv);
+                    body.scrollTop = body.scrollHeight;
+                }, 300);
+
+                input.value = '';
+                body.scrollTop = body.scrollHeight;
+            }
+        });
+    </script>
+</body>
+
+</html>
