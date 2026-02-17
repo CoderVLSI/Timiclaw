@@ -216,17 +216,17 @@
 
 // Web job backend integration
 #ifndef ENABLE_WEB_JOBS
-#define ENABLE_WEB_JOBS 1
+#define ENABLE_WEB_JOBS 0
 #endif
 
 // Planning command
 #ifndef ENABLE_PLAN
-#define ENABLE_PLAN 1
+#define ENABLE_PLAN 0
 #endif
 
 // GPIO/Hardware control (relay, LED flash, sensor read)
 #ifndef ENABLE_GPIO
-#define ENABLE_GPIO 1
+#define ENABLE_GPIO 0
 #endif
 
 #endif
