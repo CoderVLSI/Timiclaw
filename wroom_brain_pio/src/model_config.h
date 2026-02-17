@@ -25,4 +25,17 @@ struct ModelConfigInfo {
 
 bool model_config_get_active_config(ModelConfigInfo &config);
 
+// Fallback provider support for quota/rate limit handling
+String model_config_get_fallback_provider(const String &exclude_provider);
+bool model_config_is_provider_failed(const String &provider);
+void model_config_mark_provider_failed(const String &provider, int http_status);
+void model_config_reset_failed_provider(const String &provider);
+void model_config_reset_all_failed_providers();
+String model_config_get_failed_status();
+
+// Timeout for retrying failed providers (milliseconds)
+#ifndef MODEL_FAIL_RETRY_MS
+#define MODEL_FAIL_RETRY_MS 900000  // 15 minutes
+#endif
+
 #endif

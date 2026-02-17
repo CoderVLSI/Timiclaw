@@ -23,6 +23,14 @@ const char *kGlmKeyPrefix = "glm_";
 const char *kApiKeySuffix = "key";
 const char *kModelSuffix = "model";
 
+// Failed provider tracking suffixes
+const char *kFailedTimeSuffix = "_failed";
+const char *kFailedStatusSuffix = "_status";
+
+// Provider priority for fallback (in order)
+const char *kProviderPriority[] = {"gemini", "openai", "anthropic", "glm"};
+const size_t kProviderPriorityCount = 4;
+
 String to_lower(String value) {
   value.toLowerCase();
   return value;
@@ -352,4 +360,143 @@ bool model_config_get_active_config(ModelConfigInfo &config) {
   config.baseUrl = get_provider_base_url(provider);
 
   return config.apiKey.length() > 0;
+}
+
+// Get the next available fallback provider (excluding the specified one)
+String model_config_get_fallback_provider(const String &exclude_provider) {
+  String exclude_lc = to_lower(exclude_provider);
+
+  for (size_t i = 0; i < kProviderPriorityCount; i++) {
+    String provider = kProviderPriority[i];
+    if (provider == exclude_lc) {
+      continue;  // Skip the excluded provider
+    }
+    if (!model_config_is_provider_configured(provider)) {
+      continue;  // Not configured
+    }
+    if (model_config_is_provider_failed(provider)) {
+      continue;  // Currently failed
+    }
+    return provider;  // Found a valid fallback
+  }
+
+  return "";  // No fallback available
+}
+
+// Check if a provider is currently marked as failed
+bool model_config_is_provider_failed(const String &provider) {
+  String err;
+  if (!ensure_ready(err)) {
+    return false;
+  }
+
+  String prefix = get_provider_prefix(provider);
+  if (prefix.length() == 0) {
+    return false;
+  }
+
+  unsigned long failed_time = g_prefs.getUInt(
+      make_key(prefix, kFailedTimeSuffix).c_str(), 0);
+  if (failed_time == 0) {
+    return false;  // Never failed
+  }
+
+  // Check if timeout has expired
+  unsigned long now = millis() / 1000;  // Convert to seconds (approximate)
+  if (now < failed_time) {
+    // millis() wrapped around, reset
+    g_prefs.remove(make_key(prefix, kFailedTimeSuffix).c_str());
+    return false;
+  }
+
+  unsigned long elapsed_sec = now - failed_time;
+  unsigned long timeout_sec = MODEL_FAIL_RETRY_MS / 1000;
+
+  if (elapsed_sec >= timeout_sec) {
+    // Timeout expired, clear the failed status
+    g_prefs.remove(make_key(prefix, kFailedTimeSuffix).c_str());
+    g_prefs.remove(make_key(prefix, kFailedStatusSuffix).c_str());
+    return false;
+  }
+
+  return true;  // Still within timeout period
+}
+
+// Mark a provider as failed with timestamp and HTTP status
+void model_config_mark_provider_failed(const String &provider, int http_status) {
+  String err;
+  if (!ensure_ready(err)) {
+    return;
+  }
+
+  String prefix = get_provider_prefix(provider);
+  if (prefix.length() == 0) {
+    return;
+  }
+
+  // Store timestamp (seconds since boot, approximate)
+  unsigned long now = millis() / 1000;
+  g_prefs.putUInt(make_key(prefix, kFailedTimeSuffix).c_str(), now);
+  g_prefs.putInt(make_key(prefix, kFailedStatusSuffix).c_str(), http_status);
+
+  Serial.printf("[model_config] Marked %s as failed (HTTP %d), will retry in %ld min\n",
+                provider.c_str(), http_status, MODEL_FAIL_RETRY_MS / 60000);
+}
+
+// Reset failed status for a specific provider
+void model_config_reset_failed_provider(const String &provider) {
+  String err;
+  if (!ensure_ready(err)) {
+    return;
+  }
+
+  String prefix = get_provider_prefix(provider);
+  if (prefix.length() == 0) {
+    return;
+  }
+
+  g_prefs.remove(make_key(prefix, kFailedTimeSuffix).c_str());
+  g_prefs.remove(make_key(prefix, kFailedStatusSuffix).c_str());
+
+  Serial.printf("[model_config] Reset failed status for: %s\n", provider.c_str());
+}
+
+// Reset all failed providers
+void model_config_reset_all_failed_providers() {
+  String err;
+  if (!ensure_ready(err)) {
+    return;
+  }
+
+  for (size_t i = 0; i < kProviderPriorityCount; i++) {
+    String provider = kProviderPriority[i];
+    String prefix = get_provider_prefix(provider);
+    g_prefs.remove(make_key(prefix, kFailedTimeSuffix).c_str());
+    g_prefs.remove(make_key(prefix, kFailedStatusSuffix).c_str());
+  }
+
+  Serial.println("[model_config] Reset all failed providers");
+}
+
+// Get status of failed providers
+String model_config_get_failed_status() {
+  String result = "";
+  bool any_failed = false;
+
+  for (size_t i = 0; i < kProviderPriorityCount; i++) {
+    String provider = kProviderPriority[i];
+    if (model_config_is_provider_failed(provider)) {
+      any_failed = true;
+      if (result.length() > 0) {
+        result += ", ";
+      }
+      result += provider;
+    }
+  }
+
+  if (!any_failed) {
+    return "No providers currently failed.";
+  }
+
+  return "Failed providers: " + result;
 }

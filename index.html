@@ -451,6 +451,69 @@
         .cmt {
             color: #6a9955;
         }
+
+        /* Animations */
+        @keyframes float {
+            0% {
+                transform: translateY(0px);
+            }
+
+            50% {
+                transform: translateY(-20px);
+            }
+
+            100% {
+                transform: translateY(0px);
+            }
+        }
+
+        .float-anim {
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .fade-in-up {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 0.8s ease-out, transform 0.8s ease-out;
+        }
+
+        .fade-in-up.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .stagger-1 {
+            transition-delay: 0.1s;
+        }
+
+        .stagger-2 {
+            transition-delay: 0.3s;
+        }
+
+        .stagger-3 {
+            transition-delay: 0.5s;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0;
+            }
+        }
+
+        .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 15px;
+            background: #fff;
+            margin-left: 2px;
+            animation: blink 1s step-end infinite;
+        }
     </style>
 </head>
 
@@ -477,9 +540,11 @@
         <div class="hero-bg"></div>
         <div class="container">
             <div class="hero-content">
-                <div class="mono" style="color: var(--accent); margin-bottom: 1rem;">// ENV: EMBEDDED_AGENT</div>
-                <h1>The First <span class="text-gradient">Embedded Agent Framework.</span></h1>
-                <p>
+                <div class="mono fade-in-up stagger-1" style="color: var(--accent); margin-bottom: 1rem;">// ENV:
+                    EMBEDDED_AGENT</div>
+                <h1 class="fade-in-up stagger-2">The First <span class="text-gradient">Embedded Agent Framework.</span>
+                </h1>
+                <p class="fade-in-up stagger-3">
                     <strong>OpenClaw</strong> and <strong>PicoClaw</strong> dominate the desktop. <br>
                     <strong>Timiclaw</strong> conquers the physical world.<br>
                     Deploy autonomous agent frameworks directly to microcontrollers.
@@ -492,7 +557,7 @@
                         Benchmarks</a>
                 </div>
 
-                <div class="hero-stats">
+                <div class="hero-stats fade-in-up stagger-3">
                     <div class="stat-item">
                         <h4>Secure</h4>
                         <p>No OS Kernel</p>
@@ -523,13 +588,11 @@
                     <span>timiclaw@embedded-host ~</span>
                 </div>
                 <div class="terminal-body" id="term-body">
-                    <div class="msg sys">Booting Framework v1.2... Done (800ms).</div>
-                    <div class="msg bot">Framework Status: ACTIVE<br>Core: ESP32-WROOM<br>Agent: Connected (Gemini 2.0
-                        Flash)<br>Sensors: Ready.</div>
+                    <div class="msg sys" id="boot-msg"></div>
                 </div>
                 <div class="terminal-input">
                     <span class="prompt">$</span>
-                    <input type="text" class="input-field" id="term-input" placeholder="Interact with Framework..."
+                    <input type="text" class="input-field" id="term-input" placeholder="Type 'help'..."
                         autocomplete="off">
                 </div>
             </div>
@@ -539,7 +602,7 @@
         <!-- Mascot (Absolute in Header) -->
         <div
             style="position: absolute; left: 5%; bottom: 10%; width: 320px; z-index: 10; pointer-events: none; mix-blend-mode: screen;">
-            <img src="assets/timi-mascot.jpg" alt="Timi the Bot Rex"
+            <img class="float-anim" src="assets/timi-mascot.jpg" alt="Timi the Bot Rex"
                 style="width: 100%; height: auto; mask-image: linear-gradient(to bottom, black 85%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);">
         </div>
 
@@ -548,12 +611,13 @@
     <!-- Framework Comparison -->
     <section id="comparison">
         <div class="container">
-            <h2 class="text-gradient" style="font-size: 2.5rem; margin-bottom: 1rem;">Framework Landscape</h2>
-            <p style="color: var(--text-secondary); max-width: 600px; margin-bottom: 3rem;">
+            <h2 class="text-gradient fade-in-up" style="font-size: 2.5rem; margin-bottom: 1rem;">Framework Landscape
+            </h2>
+            <p class="fade-in-up" style="color: var(--text-secondary); max-width: 600px; margin-bottom: 3rem;">
                 Where does Timiclaw fit in the AI Agent ecosystem?
             </p>
 
-            <table class="comparison-table">
+            <table class="comparison-table fade-in-up">
                 <thead>
                     <tr>
                         <th>Specification</th>
@@ -765,19 +829,19 @@
         <div class="container">
             <h2 class="text-gradient" style="font-size: 2.5rem; margin-bottom: 3rem;">Embedded Advantages</h2>
             <div class="grid">
-                <div class="card">
+                <div class="card fade-in-up stagger-1">
                     <div class="card-icon">🔌</div>
                     <h3>Direct Hardware Access</h3>
                     <p style="color: var(--text-secondary);">Unlike desktop frameworks, Timiclaw speaks directly to
                         voltage. Control relays, motors, and sensors with zero latency.</p>
                 </div>
-                <div class="card">
+                <div class="card fade-in-up stagger-2">
                     <div class="card-icon">🛡️</div>
                     <h3>Zero Attack Surface</h3>
                     <p style="color: var(--text-secondary);">Desktop frameworks inherit OS vulnerabilities. Timiclaw
                         has no file system to ransomware, no shell to exploit.</p>
                 </div>
-                <div class="card">
+                <div class="card fade-in-up stagger-3">
                     <div class="card-icon">⚡</div>
                     <h3>Dedicated Function</h3>
                     <p style="color: var(--text-secondary);">A desktop framework competes with Chrome for RAM. Timiclaw
@@ -825,10 +889,65 @@
         </div>
     </footer>
 
-    <!-- Terminal Script -->
+    <!-- Animations & Terminal Script -->
     <script>
+        // Scroll Reveal
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                    observer.unobserve(entry.target); // Only animate once
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.fade-in-up').forEach(el => observer.observe(el));
+
+        // Terminal Logic
         const input = document.getElementById('term-input');
         const body = document.getElementById('term-body');
+        const bootMsg = document.getElementById('boot-msg');
+
+        const bootSequence = [
+            "Booting Timiclaw v1.0...",
+            "Loading Core: ESP32-WROOM... [OK]",
+            "Initializing Sensors... [OK]",
+            "Connecting to Agent (Gemini 2.0 Flash)...",
+            "Connection Established 🚀",
+            "System Ready. Type 'help' for commands."
+        ];
+
+        let lineIndex = 0;
+        let charIndex = 0;
+        let currentText = "";
+
+        function typeBoot() {
+            if (lineIndex < bootSequence.length) {
+                const line = bootSequence[lineIndex];
+                if (charIndex < line.length) {
+                    currentText += line.charAt(charIndex);
+                    // Use standard cursor for typing
+                    bootMsg.innerHTML = currentText + '<span class="cursor"></span>';
+                    charIndex++;
+                    setTimeout(typeBoot, 20 + Math.random() * 30);
+                } else {
+                    currentText += "<br>";
+                    bootMsg.innerHTML = currentText + '<span class="cursor"></span>';
+                    lineIndex++;
+                    charIndex = 0;
+                    setTimeout(typeBoot, 400); // Pause between lines
+                }
+                body.scrollTop = body.scrollHeight;
+            } else {
+                // Done typing, keep blinking cursor
+                bootMsg.innerHTML = currentText + '<span class="cursor"></span>';
+            }
+        }
+
+        // Start typing after delay
+        setTimeout(typeBoot, 800);
+
+        // User Input Handler (Existing Logic)
         const responses = {
             'status': 'Framework: ONLINE\nMode: Agent\nHeap: 124KB Free',
             'help': 'Commands: gpio_write, sensor_read, status, pc_exec',
@@ -859,8 +978,7 @@
                 body.scrollTop = body.scrollHeight;
             }
         });
-    </script>
-    <script>
+
         function toggleTerminal() {
             const term = document.getElementById('hero-terminal');
             const body = term.querySelector('.terminal-body');

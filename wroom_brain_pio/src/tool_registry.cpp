@@ -169,7 +169,6 @@ bool relay_set_now(int pin, int state, String &out) {
 }
 
 void build_help_text(String &out) {
-  out =
       "Commands:\n"
       "status\n"
       "help\n"
@@ -178,33 +177,49 @@ void build_help_text(String &out) {
       "usage\n"
       "security\n"
       "update [url]\n"
+#if ENABLE_GPIO
       "relay_set <pin> <0|1> (requires confirm)\n"
       "flash_led [1-20] (requires confirm)\n"
+#endif
       "reminder_set_daily <HH:MM> <message>\n"
       "reminder_show | reminder_clear\n"
+#if ENABLE_WEB_JOBS
       "webjob_set_daily <HH:MM> <task>\n"
       "webjob_show | webjob_run | webjob_clear\n"
       "web_files_make [topic]\n"
+#endif
       "timezone_show | timezone_set <Zone> | timezone_clear\n"
+#if ENABLE_TASKS
       "task_add <text> | task_list | task_done <id> | task_clear\n"
+#endif
+#if ENABLE_EMAIL
       "email_draft <to>|<subject>|<body> | email_show | email_clear\n"
       "send_email <to> <subject> <message>\n"
+#endif
       "safe_mode | safe_mode_on | safe_mode_off\n"
       "logs | logs_clear\n"
       "time_show\n"
       "soul_show | soul_set <text> | soul_clear\n"
       "heartbeat_show | heartbeat_set <text> | heartbeat_clear\n"
+#if ENABLE_IMAGE_GEN
       "generate_image <prompt>\n"
+#endif
+#if ENABLE_EMAIL
       "email_code [to email]\n"
+#endif
       "confirm [id]\n"
       "cancel\n"
+#if ENABLE_GPIO
       "sensor_read <pin>\n"
+#endif
+#if ENABLE_PLAN
       "plan <task>\n"
+#endif
       "remember <note>\n"
       "memory\n"
       "forget\n"
-      "model list | model status | model use <provider>\n"
-      "model set <provider> <api_key> | model clear <provider>";
+      "model list | model status | model failed | model reset_failed\n"
+      "model use <provider> | model set <provider> <api_key> | model clear <provider>";
 }
 
 String wifi_health_line() {
@@ -230,16 +245,32 @@ static bool looks_like_update_request(const String &text_lc) {
 
 void tool_registry_init() {
   Serial.println(
-      "[tools] allowlist: status, relay_set <pin> <0|1>, sensor_read <pin>, "
-      "flash_led [count], help, health, specs, usage, security, update [url], confirm, cancel, plan <task>, "
+      "[tools] allowlist: status, "
+#if ENABLE_GPIO
+      "relay_set <pin> <0|1>, sensor_read <pin>, flash_led [count], "
+#endif
+      "help, health, specs, usage, security, update [url], confirm, cancel, "
+#if ENABLE_PLAN
+      "plan <task>, "
+#endif
       "reminder_set_daily/reminder_show/reminder_clear, timezone_show/timezone_set/timezone_clear, "
+#if ENABLE_WEB_JOBS
       "webjob_set_daily/webjob_show/webjob_run/webjob_clear, "
       "web_files_make, "
+#endif
+#if ENABLE_TASKS
       "task_add/task_list/task_done/task_clear, "
-      "email_draft/email_show/email_clear, safe_mode, logs, time_show, "
+#endif
+#if ENABLE_EMAIL
+      "email_draft/email_show/email_clear, "
+#endif
+      "safe_mode, logs, time_show, "
       "soul_show/soul_set/soul_clear, heartbeat_show/heartbeat_set/heartbeat_clear, "
-      "remember <note>, memory, forget, generate_image <prompt>, "
-      "model list/model status/model use/model set/model clear");
+      "remember <note>, memory, forget, "
+#if ENABLE_IMAGE_GEN
+      "generate_image <prompt>, "
+#endif
+      "model list/model status/model failed/model reset_failed/model use/model set/model clear");
 }
 
 static bool parse_two_ints(const String &s, const char *fmt, int *a, int *b) {
@@ -1927,6 +1958,7 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+#if ENABLE_TASKS
   if (cmd_lc == "task_list") {
     String err;
     if (!task_list(out, err)) {
@@ -1978,7 +2010,9 @@ bool tool_registry_execute(const String &input, String &out) {
     out = "OK: task #" + String(id) + " done";
     return true;
   }
+#endif
 
+#if ENABLE_EMAIL
   if (cmd_lc == "email_show") {
     String to;
     String subject;
@@ -2042,6 +2076,7 @@ bool tool_registry_execute(const String &input, String &out) {
     out = "OK: email draft saved (draft only, not sent)";
     return true;
   }
+#endif
 
   if (cmd_lc == "timezone_show") {
     String tz;
@@ -2128,6 +2163,7 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+#if ENABLE_WEB_JOBS
   if (cmd_lc == "webjob_show") {
     String hhmm;
     String msg;
@@ -2145,6 +2181,7 @@ bool tool_registry_execute(const String &input, String &out) {
     out = "Daily web job " + hhmm + ":\nTask: " + webjob_task_from_message(msg);
     return true;
   }
+#endif
 
   if (cmd_lc == "reminder_clear") {
     String err;
@@ -2156,6 +2193,7 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+#if ENABLE_WEB_JOBS
   if (cmd_lc == "webjob_clear") {
     String hhmm;
     String msg;
@@ -2177,6 +2215,7 @@ bool tool_registry_execute(const String &input, String &out) {
     out = "OK: daily web job cleared";
     return true;
   }
+#endif
 
   if (cmd_lc == "reminder_run") {
     String hhmm;
@@ -2193,6 +2232,7 @@ bool tool_registry_execute(const String &input, String &out) {
       return true;
     }
     if (is_webjob_message(msg)) {
+#if ENABLE_WEB_JOBS
       String task = webjob_task_from_message(msg);
       if (task.length() == 0) {
         out = "ERR: empty web job task";
@@ -2205,11 +2245,16 @@ bool tool_registry_execute(const String &input, String &out) {
       }
       out = "Web job (" + hhmm + "): " + task + "\n" + job_out;
       return true;
+#else
+      out = "ERR: web jobs are not enabled";
+      return true;
+#endif
     }
     out = "Reminder (" + hhmm + "): " + msg;
     return true;
   }
 
+#if ENABLE_WEB_JOBS
   if (cmd_lc == "webjob_run") {
     String hhmm;
     String msg;
@@ -2253,11 +2298,13 @@ bool tool_registry_execute(const String &input, String &out) {
   if (extract_web_query_from_text(cmd, web_query)) {
     return run_webjob_now_task(web_query, out);
   }
+#endif
   if (cmd_lc.indexOf("search web") >= 0 || cmd_lc.indexOf("web search") >= 0) {
     out = "Yes. Tell me what to search.\nExample: search for cricket matches today";
     return true;
   }
 
+#if ENABLE_WEB_JOBS
   if (cmd_lc == "webjob_set_daily" || cmd_lc.startsWith("webjob_set_daily ")) {
     String tail = cmd.length() > 16 ? cmd.substring(16) : "";
     tail.trim();
@@ -2298,6 +2345,7 @@ bool tool_registry_execute(const String &input, String &out) {
     out = "OK: daily web job set at " + hhmm + "\nTask: " + task;
     return true;
   }
+#endif
 
   if (cmd_lc == "reminder_set_daily" || cmd_lc.startsWith("reminder_set_daily ")) {
     String tail = cmd.length() > 18 ? cmd.substring(18) : "";
@@ -2376,6 +2424,7 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+#if ENABLE_WEB_JOBS
   String webjob_hhmm;
   String webjob_task;
   if (parse_natural_daily_webjob(cmd, webjob_hhmm, webjob_task)) {
@@ -2399,6 +2448,7 @@ bool tool_registry_execute(const String &input, String &out) {
     out = "OK: daily web job set at " + webjob_hhmm + "\nTask: " + webjob_task;
     return true;
   }
+#endif
 
   if (has_daily_words(cmd_lc) && !cmd_lc.startsWith("reminder_") &&
       !cmd_lc.startsWith("timezone_")) {
@@ -2638,6 +2688,7 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+#if ENABLE_GPIO
   const int led_flash_count = parse_led_flash_count(cmd_lc);
   if (led_flash_count != 0) {
     if (is_safe_mode_enabled()) {
@@ -2665,7 +2716,9 @@ bool tool_registry_execute(const String &input, String &out) {
           "\nOr: cancel";
     return true;
   }
+#endif
 
+#if ENABLE_GPIO
   if (cmd_lc.startsWith("relay_set ")) {
     if (is_safe_mode_enabled()) {
       out = "ERR: safe mode ON. relay_set blocked";
@@ -2709,7 +2762,9 @@ bool tool_registry_execute(const String &input, String &out) {
     out = "ERR: usage sensor_read <pin>";
     return true;
   }
+#endif
 
+#if ENABLE_PLAN
   if (cmd_lc == "plan" || cmd_lc.startsWith("plan ")) {
     String task = cmd.length() > 4 ? cmd.substring(4) : "";
     task.trim();
@@ -2731,6 +2786,7 @@ bool tool_registry_execute(const String &input, String &out) {
     out = plan_text;
     return true;
   }
+#endif
 
   if (cmd_lc == "memory") {
     String notes;
@@ -2777,6 +2833,7 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+#if ENABLE_IMAGE_GEN
   if (cmd_lc == "generate_image" || cmd_lc.startsWith("generate_image ")) {
     String prompt = "";
     if (cmd_lc.startsWith("generate_image ")) {
@@ -2803,7 +2860,9 @@ bool tool_registry_execute(const String &input, String &out) {
     out = "Image generated and sent";
     return true;
   }
+#endif
 
+#if ENABLE_EMAIL
   // email_code - emails the last generated code/response
   if (cmd_lc.startsWith("email_code") || cmd_lc.startsWith("email the code") ||
       cmd_lc.startsWith("send me the code") || cmd_lc.startsWith("mail me the code")) {
@@ -2845,7 +2904,9 @@ bool tool_registry_execute(const String &input, String &out) {
     }
     return true;
   }
+#endif
 
+#if ENABLE_MEDIA_UNDERSTANDING
   if (cmd_lc.indexOf("summarize") >= 0 || cmd_lc.indexOf("analyse") >= 0 ||
       cmd_lc.indexOf("analyze") >= 0 || cmd_lc.indexOf("describe") >= 0 ||
       cmd_lc.indexOf("explain") >= 0 || cmd_lc.indexOf("read this") >= 0 ||
@@ -2879,6 +2940,7 @@ bool tool_registry_execute(const String &input, String &out) {
     
     // Fall through if no media found (might be normal text chat)
   }
+#endif
 
   // Model management commands
   if (cmd_lc == "model list" || cmd_lc == "model_list") {
@@ -2962,6 +3024,18 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+  if (cmd_lc == "model failed" || cmd_lc == "model_failed") {
+    out = model_config_get_failed_status();
+    return true;
+  }
+
+  if (cmd_lc == "model reset_failed" || cmd_lc == "model_reset_failed") {
+    model_config_reset_all_failed_providers();
+    out = "OK: All failed providers have been reset. You can try them again.";
+    return true;
+  }
+
+#if ENABLE_EMAIL
   if (cmd_lc.startsWith("send_email ") || cmd_lc.startsWith("send_email ")) {
     String remaining = cmd.length() > 10 ? cmd.substring(10) : "";
     remaining.trim();
@@ -3008,6 +3082,7 @@ bool tool_registry_execute(const String &input, String &out) {
     out = "OK: Email sent to " + to;
     return true;
   }
+#endif
 
   return false;
 }

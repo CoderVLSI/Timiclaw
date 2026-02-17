@@ -378,93 +378,176 @@ bool call_glm_zai(const String &endpoint_url, const String &api_key, const Strin
   return true;
 }
 
+// Check if an error indicates quota/rate limit (should trigger fallback)
+static bool is_quota_error(const String &error) {
+  String lc = error;
+  lc.toLowerCase();
+  return (lc.indexOf("http 429") >= 0) ||
+         (lc.indexOf("quota") >= 0) ||
+         (lc.indexOf("rate limit") >= 0) ||
+         (lc.indexOf("billing") >= 0) ||
+         (lc.indexOf("limit exceeded") >= 0);
+}
+
+// Try to call a specific provider by name
+static bool try_provider(const String &provider, const String &model,
+                        const String &system_prompt, const String &task,
+                        String &response_out, String &error_out) {
+  String prov = to_lower(provider);
+
+  if (prov == "openai") {
+    String mod = model.length() > 0 ? model : String("gpt-4.1-mini");
+    String baseUrl = String(LLM_OPENAI_BASE_URL);
+    return call_openai_like(baseUrl, "", mod, system_prompt, task, response_out, error_out);
+  }
+
+  if (prov == "anthropic") {
+    String mod = model.length() > 0 ? model : String("claude-3-5-sonnet-latest");
+    String baseUrl = String(LLM_ANTHROPIC_BASE_URL);
+    return call_anthropic(baseUrl, "", mod, system_prompt, task, response_out, error_out);
+  }
+
+  if (prov == "gemini") {
+    String mod = model.length() > 0 ? model : String("gemini-2.0-flash");
+    String baseUrl = String(LLM_GEMINI_BASE_URL);
+    return call_gemini(baseUrl, "", mod, system_prompt, task, response_out, error_out);
+  }
+
+  if (prov == "glm") {
+    String mod = model.length() > 0 ? model : String("glm-4.7");
+    String baseUrl = String(LLM_GLM_BASE_URL);
+    return call_glm_zai(baseUrl, "", mod, system_prompt, task, response_out, error_out);
+  }
+
+  error_out = "Unsupported provider: " + provider;
+  return false;
+}
+
 bool llm_generate_with_prompt(const String &system_prompt, const String &task, bool include_memory,
                               String &response_out, String &error_out) {
-  // Try to get config from NVS first, fallback to .env defaults
-  ModelConfigInfo config;
-  bool has_config = model_config_get_active_config(config);
-
-  String provider;
-  String api_key;
-  String model;
-
-  if (has_config) {
-    provider = config.provider;
-    api_key = config.apiKey;
-    model = config.model;
-  } else {
-    // Fallback to compile-time .env defaults
-    provider = to_lower(String(LLM_PROVIDER));
-    api_key = String(LLM_API_KEY);
-    model = String(LLM_MODEL);
+  // Enrich task with memory if requested
+  String enriched_task = task;
+  if (include_memory) {
+    String notes;
+    String mem_err;
+    if (memory_get_notes(notes, mem_err)) {
+      notes.trim();
+      if (notes.length() > 0) {
+        if (notes.length() > 400) {
+          notes = notes.substring(notes.length() - 400);
+        }
+        enriched_task = String("Persistent memory:\n") + notes + "\n\nTask:\n" + task;
+      }
+    }
   }
 
-  if (provider == "none" || provider.length() == 0) {
-    error_out = "LLM disabled. Use: /model set <provider> <api_key>";
-    return false;
-  }
-
-  if (api_key.length() == 0) {
-    error_out = "No API key configured for " + provider + ". Use: /model set " + provider + " <your_api_key>";
-    return false;
-  }
-
-  if (task.length() == 0) {
+  if (enriched_task.length() == 0) {
     error_out = "Missing task text";
     return false;
   }
 
-  String notes;
-  String mem_err;
-  String enriched_task = task;
-  if (include_memory && memory_get_notes(notes, mem_err)) {
-    notes.trim();
-    if (notes.length() > 0) {
-      if (notes.length() > 400) {
-        notes = notes.substring(notes.length() - 400);
+  // Get primary provider config
+  String primary_provider;
+  String primary_model;
+  ModelConfigInfo config;
+
+  if (model_config_get_active_config(config)) {
+    primary_provider = config.provider;
+    primary_model = config.model;
+  } else {
+    primary_provider = to_lower(String(LLM_PROVIDER));
+    primary_model = String(LLM_MODEL);
+  }
+
+  if (primary_provider == "none" || primary_provider.length() == 0) {
+    error_out = "LLM disabled. Use: /model set <provider> <api_key>";
+    return false;
+  }
+
+  // Check if primary provider has API key
+  String primary_key = model_config_get_api_key(primary_provider);
+  if (primary_key.length() == 0) {
+    error_out = "No API key configured for " + primary_provider + ". Use: /model set " + primary_provider + " <your_api_key>";
+    return false;
+  }
+
+  // Try primary provider first
+  String provider = primary_provider;
+  String model = primary_model;
+  String api_key = primary_key;
+  bool using_fallback = false;
+  String fallback_reason = "";
+
+  // Try provider (primary or fallback)
+  while (true) {
+    bool result = false;
+    String prov = to_lower(provider);
+
+    // Call the appropriate provider
+    if (prov == "openai") {
+      String mod = model.length() > 0 ? model : String("gpt-4.1-mini");
+      String baseUrl = config.baseUrl.length() > 0 ? config.baseUrl : String(LLM_OPENAI_BASE_URL);
+      result = call_openai_like(baseUrl, api_key, mod, system_prompt, enriched_task, response_out, error_out);
+    } else if (prov == "anthropic") {
+      String mod = model.length() > 0 ? model : String("claude-3-5-sonnet-latest");
+      String baseUrl = config.baseUrl.length() > 0 ? config.baseUrl : String(LLM_ANTHROPIC_BASE_URL);
+      result = call_anthropic(baseUrl, api_key, mod, system_prompt, enriched_task, response_out, error_out);
+    } else if (prov == "gemini") {
+      String mod = model.length() > 0 ? model : String("gemini-2.0-flash");
+      String baseUrl = config.baseUrl.length() > 0 ? config.baseUrl : String(LLM_GEMINI_BASE_URL);
+      result = call_gemini(baseUrl, api_key, mod, system_prompt, enriched_task, response_out, error_out);
+    } else if (prov == "glm") {
+      String mod = model.length() > 0 ? model : String("glm-4.7");
+      String baseUrl = config.baseUrl.length() > 0 ? config.baseUrl : String(LLM_GLM_BASE_URL);
+      result = call_glm_zai(baseUrl, api_key, mod, system_prompt, enriched_task, response_out, error_out);
+    } else {
+      error_out = "Unsupported provider: " + provider;
+      if (using_fallback) {
+        error_out += " (fallback from " + primary_provider + ")";
       }
-      enriched_task = String("Persistent memory:\n") + notes + "\n\nTask:\n" + task;
+      return false;
     }
-  }
 
-  if (provider == "openai") {
-    if (model.length() == 0) {
-      model = "gpt-4.1-mini";
+    // If successful, add fallback notice if applicable
+    if (result) {
+      if (using_fallback) {
+        response_out = "⚠️ Using " + provider + " (" + fallback_reason + ")\n\n" + response_out;
+      }
+      return true;
     }
-    String baseUrl = (has_config && config.baseUrl.length() > 0) ? config.baseUrl : String(LLM_OPENAI_BASE_URL);
-    return call_openai_like(baseUrl, api_key, model, system_prompt,
-                            enriched_task, response_out, error_out);
-  }
 
-  if (provider == "anthropic") {
-    if (model.length() == 0) {
-      model = "claude-3-5-sonnet-latest";
+    // Check if error is quota/rate limit (should trigger fallback)
+    if (!is_quota_error(error_out)) {
+      // Not a quota error, just fail
+      if (using_fallback) {
+        error_out += " (fallback from " + primary_provider + ")";
+      }
+      return false;
     }
-    String baseUrl = (has_config && config.baseUrl.length() > 0) ? config.baseUrl : String(LLM_ANTHROPIC_BASE_URL);
-    return call_anthropic(baseUrl, api_key, model, system_prompt,
-                          enriched_task, response_out, error_out);
-  }
 
-  if (provider == "gemini") {
-    if (model.length() == 0) {
-      model = "gemini-2.0-flash";
+    // Quota error - mark provider as failed and try fallback
+    model_config_mark_provider_failed(provider, 429);
+
+    // Find fallback provider
+    String fallback = model_config_get_fallback_provider(provider);
+    if (fallback.length() == 0) {
+      // No fallback available
+      error_out += " (all providers failed or rate limited)";
+      return false;
     }
-    String baseUrl = (has_config && config.baseUrl.length() > 0) ? config.baseUrl : String(LLM_GEMINI_BASE_URL);
-    return call_gemini(baseUrl, api_key, model, system_prompt, enriched_task,
-                       response_out, error_out);
-  }
 
-  if (provider == "glm") {
-    if (model.length() == 0) {
-      model = "glm-4.7";
-    }
-    String baseUrl = (has_config && config.baseUrl.length() > 0) ? config.baseUrl : String(LLM_GLM_BASE_URL);
-    return call_glm_zai(baseUrl, api_key, model, system_prompt, enriched_task,
-                        response_out, error_out);
-  }
+    // Switch to fallback
+    using_fallback = true;
+    fallback_reason = primary_provider + " rate limited";
+    provider = fallback;
+    model = model_config_get_model(fallback);
+    api_key = model_config_get_api_key(fallback);
+    config.baseUrl = "";  // Reset for new provider
 
-  error_out = "Unsupported LLM_PROVIDER. Use: openai, anthropic, gemini, glm, none";
-  return false;
+    Serial.printf("[llm] Switching to fallback provider: %s\n", provider.c_str());
+
+    // Loop to try the fallback
+  }
 }
 
 String first_line_clean(const String &value) {
@@ -609,6 +692,8 @@ bool llm_route_tool_command(const String &message, String &command_out, String &
   command_out = routed;
   return true;
 }
+
+#if ENABLE_IMAGE_GEN
 
 bool llm_generate_image(const String &prompt, String &base64_out, String &error_out) {
   String provider = to_lower(String(IMAGE_PROVIDER));
@@ -764,6 +849,10 @@ bool llm_generate_image(const String &prompt, String &base64_out, String &error_
   return false;
 }
 
+#endif  // ENABLE_IMAGE_GEN
+
+#if ENABLE_MEDIA_UNDERSTANDING
+
 bool llm_understand_media(const String &instruction, const String &mime_type,
                           const String &base64_data, String &reply_out, String &error_out) {
   reply_out = "";
@@ -874,6 +963,8 @@ bool llm_understand_media(const String &instruction, const String &mime_type,
   usage_record_call("media", 200, "gemini", model.c_str());
   return true;
 }
+
+#endif  // ENABLE_MEDIA_UNDERSTANDING
 
 namespace {
 

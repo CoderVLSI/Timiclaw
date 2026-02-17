@@ -189,4 +189,44 @@
 #define GITHUB_REPO ""
 #endif
 
+// ============================================================================
+// COMPILE-TIME FEATURE FLAGS
+// Set to 0 to disable features and reduce flash usage
+// ============================================================================
+
+// Email functionality (draft, send, email_code)
+#ifndef ENABLE_EMAIL
+#define ENABLE_EMAIL 1
+#endif
+
+// Image generation via LLM providers
+#ifndef ENABLE_IMAGE_GEN
+#define ENABLE_IMAGE_GEN 1
+#endif
+
+// Media understanding (PDF, image analysis)
+#ifndef ENABLE_MEDIA_UNDERSTANDING
+#define ENABLE_MEDIA_UNDERSTANDING 1
+#endif
+
+// Task management system
+#ifndef ENABLE_TASKS
+#define ENABLE_TASKS 1
+#endif
+
+// Web job backend integration
+#ifndef ENABLE_WEB_JOBS
+#define ENABLE_WEB_JOBS 1
+#endif
+
+// Planning command
+#ifndef ENABLE_PLAN
+#define ENABLE_PLAN 1
+#endif
+
+// GPIO/Hardware control (relay, LED flash, sensor read)
+#ifndef ENABLE_GPIO
+#define ENABLE_GPIO 1
+#endif
+
 #endif

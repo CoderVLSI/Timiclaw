@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "brain_config.h"
 #include "scheduler.h"
 #include "chat_history.h"
 #include "memory_store.h"
@@ -153,7 +154,9 @@ void agent_loop_init() {
   memory_init();
   model_config_init();
   persona_init();
+#if ENABLE_TASKS
   task_store_init();
+#endif
   tool_registry_init();
   usage_init();
   status_led_init();
