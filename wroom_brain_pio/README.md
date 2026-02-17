@@ -1,6 +1,8 @@
-# WROOM Brain (PlatformIO)
+![TimiClaw Banner](repo-banner.png)
 
-Minimal OpenClaw-like autonomous agent scaffold for ESP32-WROOM using Arduino + PlatformIO.
+# TimiClaw (Metal Core)
+
+The first high-performance, autonomous agent framework for microcontrollers. Hard real-time, zero OS overhead, ultra-secure.
 
 ## What this does now
 

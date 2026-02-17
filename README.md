@@ -1,6 +1,6 @@
-# Timiclaw
+# TimiClaw (Metal Core)
 <p align="center">
-  <img src="assets/timiclaw-banner.png" alt="Timiclaw banner" width="920" />
+  <img src="assets/timiclaw-banner.png" alt="TimiClaw banner" width="920" />
 </p>
 
 Timiclaw is an ESP32-based autonomous Telegram agent. It runs directly on-device, executes only allowlisted tools, supports optional LLM providers, and can schedule reminders/web jobs while keeping state in NVS.
