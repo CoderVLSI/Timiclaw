@@ -8,6 +8,7 @@
 #include "brain_config.h"
 #include "chat_history.h"
 #include "memory_store.h"
+#include "file_memory.h"
 #include "model_config.h"
 #include "persona_store.h"
 #include "usage_stats.h"
@@ -605,15 +606,30 @@ bool llm_generate_plan(const String &task, String &plan_out, String &error_out) 
 
 bool llm_generate_reply(const String &message, String &reply_out, String &error_out) {
   String system_prompt = String(kChatSystemPrompt);
+
+  // Include SOUL from file_memory if available
   String soul_text;
   String soul_err;
-  if (persona_get_soul(soul_text, soul_err)) {
+  if (file_memory_read_soul(soul_text, soul_err)) {
     soul_text.trim();
     if (soul_text.length() > 0) {
       if (soul_text.length() > 600) {
         soul_text = soul_text.substring(0, 600);
       }
-      system_prompt += "\n\nSOUL profile:\n" + soul_text;
+      system_prompt += "\n\nSOUL:\n" + soul_text;
+    }
+  }
+
+  // Include MEMORY.md if available (for recall)
+  String memory_text;
+  String memory_err;
+  if (file_memory_read_long_term(memory_text, memory_err)) {
+    memory_text.trim();
+    if (memory_text.length() > 0) {
+      if (memory_text.length() > 800) {
+        memory_text = "...(truncated)\n" + memory_text.substring(memory_text.length() - 800);
+      }
+      system_prompt += "\n\nMEMORY (what you know about the user):\n" + memory_text;
     }
   }
 
@@ -636,6 +652,40 @@ bool llm_generate_reply(const String &message, String &reply_out, String &error_
   }
 
   bool result = llm_generate_with_prompt(system_prompt, task, true, reply_out, error_out);
+
+  // Auto-save important info to MEMORY.md
+  if (result) {
+    // Check if user is sharing something important about themselves
+    String msg_lc_check = message;
+    msg_lc_check.toLowerCase();
+
+    // Patterns that indicate important info to remember
+    const bool is_personal_info =
+      msg_lc_check.startsWith("my ") ||
+      msg_lc_check.startsWith("i am ") ||
+      msg_lc_check.startsWith("i'm ") ||
+      msg_lc_check.indexOf(" i like ") >= 0 ||
+      msg_lc_check.indexOf(" i love ") >= 0 ||
+      msg_lc_check.indexOf(" my favorite ") >= 0 ||
+      msg_lc_check.indexOf(" remember that ") >= 0 ||
+      msg_lc_check.startsWith("don't forget ") ||
+      (msg_lc_check.startsWith("my name is ") || msg_lc_check.startsWith("call me "));
+
+    // Also check if user explicitly asks to remember
+    const bool explicit_remember =
+      msg_lc_check.startsWith("remember ") ||
+      msg_lc_check.indexOf(" please remember") >= 0 ||
+      msg_lc_check.indexOf(" don't forget") >= 0;
+
+    if (is_personal_info || explicit_remember) {
+      // Auto-save to MEMORY.md
+      String save_err;
+      String memory_entry = "- " + message;
+      if (file_memory_append_long_term(memory_entry, save_err)) {
+        Serial.printf("[auto_memory] Saved to MEMORY.md: %s\n", message.c_str());
+      }
+    }
+  }
 
   // Track usage
   String provider;

@@ -11,6 +11,7 @@
 #include "event_log.h"
 #include "llm_client.h"
 #include "memory_store.h"
+#include "file_memory.h"
 #include "model_config.h"
 #include "persona_store.h"
 #include "scheduler.h"
@@ -215,11 +216,11 @@ void build_help_text(String &out) {
 #if ENABLE_PLAN
       "plan <task>\n"
 #endif
-      "remember <note>\n"
-      "memory\n"
-      "forget\n"
-      "model list | model status | model failed | model reset_failed\n"
-      "model use <provider> | model set <provider> <api_key> | model clear <provider>";
+      "remember <note> | memory | forget\n"
+      "file_memory | memory_read | memory_write <text>\n"
+      "user_read | daily_note <text>\n"
+      "model list | model status | model use <provider>\n"
+      "model set <provider> <api_key> | model clear <provider>";
 }
 
 String wifi_health_line() {
@@ -2250,7 +2251,19 @@ bool tool_registry_execute(const String &input, String &out) {
       return true;
 #endif
     }
-    out = "Reminder (" + hhmm + "): " + msg;
+    // Dynamic Reminder: Let the LLM "perform" the reminder
+    String prompt = "You are executing a scheduled daily reminder for the user. "
+                    "The reminder text is: \"" + msg + "\". "
+                    "If this is an instruction (e.g. 'send quotes', 'check weather'), perform it now. "
+                    "If it is a simple note (e.g. 'buy milk'), politely remind the user.";
+    
+    String reply;
+    String llm_err;
+    if (llm_generate_reply(prompt, reply, llm_err)) {
+      out = "⏰ Daily Reminder (" + hhmm + "):\n" + reply;
+    } else {
+      out = "Reminder (" + hhmm + "): " + msg + "\n(LLM failed: " + llm_err + ")";
+    }
     return true;
   }
 
@@ -2499,31 +2512,35 @@ bool tool_registry_execute(const String &input, String &out) {
   }
 
   if (cmd_lc == "soul_show" || cmd_lc == "soul") {
-    String soul;
-    String err;
-    if (!persona_get_soul(soul, err)) {
+    String soul, err;
+    if (!file_memory_read_soul(soul, err)) {
       out = "ERR: " + err;
       return true;
     }
     soul.trim();
     if (soul.length() == 0) {
-      out = "Soul is empty";
+      out = "🦖 SOUL.md is empty";
       return true;
     }
     if (soul.length() > 1400) {
-      soul = soul.substring(0, 1400);
+      soul = soul.substring(0, 1400) + "...";
     }
-    out = "SOUL:\n" + soul;
+    out = "🦖 SOUL.md:\n" + soul;
     return true;
   }
 
   if (cmd_lc == "soul_clear") {
     String err;
-    if (!persona_clear_soul(err)) {
+    // Clear both SPIFFS SOUL.md and NVS soul
+    if (!file_memory_write_soul("", err)) {
       out = "ERR: " + err;
       return true;
     }
-    out = "OK: soul cleared";
+    // Also clear NVS soul to remove old gamer soul
+    String nvs_err;
+    persona_clear_soul(nvs_err);  // Ignore error since NVS might not have a soul
+
+    out = "🦖 OK: Soul cleared (both SOUL.md and old storage)";
     return true;
   }
 
@@ -2535,11 +2552,11 @@ bool tool_registry_execute(const String &input, String &out) {
       return true;
     }
     String err;
-    if (!persona_set_soul(text, err)) {
+    if (!file_memory_write_soul(text, err)) {
       out = "ERR: " + err;
       return true;
     }
-    out = "OK: soul updated";
+    out = "🦖 OK: SOUL.md updated";
     return true;
   }
 
@@ -2830,6 +2847,85 @@ bool tool_registry_execute(const String &input, String &out) {
       return true;
     }
     out = "OK: remembered";
+    return true;
+  }
+
+  // File memory commands (SPIFFS-based)
+  if (cmd_lc == "file_memory" || cmd_lc == "files") {
+    String info, err;
+    if (!file_memory_get_info(info, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = info;
+    return true;
+  }
+
+  if (cmd_lc == "memory_read" || cmd_lc == "read_memory") {
+    String content, err;
+    if (!file_memory_read_long_term(content, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    content.trim();
+    if (content.length() == 0) {
+      out = "📚 MEMORY.md is empty";
+      return true;
+    }
+    if (content.length() > 1400) {
+      content = "...(truncated)\n" + content.substring(content.length() - 1400);
+    }
+    out = "📚 MEMORY.md:\n" + content;
+    return true;
+  }
+
+  if (cmd_lc.startsWith("memory_write ") || cmd_lc.startsWith("write_memory ")) {
+    String text = cmd.substring(cmd.indexOf(" ") + 1);
+    text.trim();
+    if (text.length() == 0) {
+      out = "ERR: usage memory_write <text>";
+      return true;
+    }
+    String err;
+    if (!file_memory_append_long_term(text, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = "🦖 OK: Written to MEMORY.md";
+    return true;
+  }
+
+  if (cmd_lc == "user_read" || cmd_lc == "read_user") {
+    String user, err;
+    if (!file_memory_read_user(user, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    user.trim();
+    if (user.length() == 0) {
+      out = "👤 USER.md is empty";
+      return true;
+    }
+    if (user.length() > 1400) {
+      user = user.substring(0, 1400) + "...";
+    }
+    out = "👤 USER.md:\n" + user;
+    return true;
+  }
+
+  if (cmd_lc.startsWith("daily_note ")) {
+    String note = cmd.substring(11);
+    note.trim();
+    if (note.length() == 0) {
+      out = "ERR: usage daily_note <text>";
+      return true;
+    }
+    String err;
+    if (!file_memory_append_daily(note, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = "📝 OK: Added to today's notes";
     return true;
   }
 

@@ -76,6 +76,7 @@ void persona_init() {
   String err;
   if (ensure_ready(err)) {
     Serial.println("[persona] NVS persona ready");
+    // No default soul - SOUL.md in SPIFFS is now the source of truth
   } else {
     Serial.println("[persona] init failed");
   }

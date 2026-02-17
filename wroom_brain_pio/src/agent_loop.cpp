@@ -6,6 +6,7 @@
 #include "scheduler.h"
 #include "chat_history.h"
 #include "memory_store.h"
+#include "file_memory.h"
 #include "llm_client.h"
 #include "model_config.h"
 #include "persona_store.h"
@@ -152,6 +153,7 @@ void agent_loop_init() {
   event_log_init();
   chat_history_init();
   memory_init();
+  file_memory_init();  // Initialize SPIFFS-based file memory
   model_config_init();
   persona_init();
 #if ENABLE_TASKS
