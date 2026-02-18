@@ -5,6 +5,7 @@
 #include "tool_registry.h"
 #include "file_memory.h"
 #include "event_log.h"
+#include "chat_history.h"
 
 namespace {
 
@@ -89,10 +90,18 @@ static const ReactTool s_react_tools[] = {
     {"heartbeat_set", "Set heartbeat instructions", "<instructions>", "heartbeat_set: Check health and report any issues"},
     {"heartbeat_clear", "Clear heartbeat configuration", "none", "heartbeat_clear"},
 
+    // Web Tools
+    {"search", "Search the web for information (news, facts)", "<query>", "search: latest AI news"},
+    {"weather", "Get current weather for a location", "<location>", "weather: Tokyo"},
+    {"time", "Get current local time", "none", "time"},
+
     // Planning (if enabled)
 #if ENABLE_PLAN
     {"plan", "Create a plan for a coding task", "<task description>", "plan: Add a new feature for reminders"},
 #endif
+
+    // Web Generation
+    {"web_files_make", "Generate and send website files (HTML, CSS, JS)", "<topic>", "web_files_make: personal portfolio, SaaS landing page"},
 
     // Pending Actions
     {"cancel", "Cancel any pending confirmation", "none", "cancel"},
@@ -285,11 +294,24 @@ bool execute_tool_action(const String &action, String &result, String &error) {
 String build_react_context(const String &user_query, const ReactStep *steps,
                            int step_count, const String &tools_prompt) {
   String context;
-  context.reserve(4000);
+  context.reserve(6000);
 
   context += build_react_system_prompt();
   context += tools_prompt;
-  context += "\n\n=== Conversation ===\n";
+
+  // Add recent chat history for context
+  String history;
+  String history_err;
+  if (chat_history_get(history, history_err)) {
+    history.trim();
+    if (history.length() > 0) {
+      context += "\n\n=== Recent Chat History ===\n";
+      context += history;
+      context += "\n";
+    }
+  }
+
+  context += "\n=== Current Conversation ===\n";
   context += "👤 User: " + user_query + "\n\n";
 
   // Add previous steps
@@ -323,12 +345,15 @@ bool react_agent_should_use(const String &query) {
   String lc = query;
   lc.toLowerCase();
 
-  // Keywords that suggest multi-step reasoning
+  // Keywords that suggest multi-step reasoning OR web generation
   const char *complex_keywords[] = {
       "how do i", "help me", "what should", "can you", "i need to",
       "remember to", "set up", "configure", "schedule", "remind me to",
       "figure out", "find out", "check if", "make sure", "todo", "task",
-      "plan", "organize", "track"
+      "plan", "organize", "track",
+      // Web generation triggers
+      "make a", "create a", "generate a", "build a", "website", "html",
+      "saas", "landing page", "portfolio", "app", "web app"
   };
 
   for (size_t i = 0; i < sizeof(complex_keywords) / sizeof(complex_keywords[0]); i++) {
