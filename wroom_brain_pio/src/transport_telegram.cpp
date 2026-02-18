@@ -19,16 +19,28 @@ static String s_last_document_name = "";
 static String s_last_document_mime = "";
 
 static String url_encode(const String &src) {
+  // Keep for backward compatibility, but preserve UTF-8 characters
   static const char *hex = "0123456789ABCDEF";
   String out;
-  out.reserve(src.length() * 3);
+  out.reserve(src.length() * 2);
+
   for (size_t i = 0; i < src.length(); i++) {
     const unsigned char c = (unsigned char)src[i];
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+
+    // Unreserved characters - pass through
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+        c == '.' || c == '~' || c == ' ') {
       out += (char)c;
-    } else if (c == ' ') {
-      out += "%20";
-    } else {
+    }
+    // UTF-8 multi-byte sequences - pass through as-is
+    // UTF-8: 10xxxxxx (continuation byte) or 110xxxxx, 1110xxxx, 11110xxx (start bytes)
+    else if (c >= 0x80) {
+      // UTF-8 byte - pass through unencoded for proper unicode handling
+      out += (char)c;
+    }
+    // Special characters that need encoding
+    else {
       out += '%';
       out += hex[(c >> 4) & 0x0F];
       out += hex[c & 0x0F];
@@ -239,6 +251,7 @@ static bool extract_last_photo_file_id(const String &body, String &file_id_out) 
   const String key = "\"file_id\":\"";
   int search = 0;
   int found = -1;
+  int count = 0;
   while (true) {
     const int pos = segment.indexOf(key, search);
     if (pos < 0) {
@@ -246,6 +259,8 @@ static bool extract_last_photo_file_id(const String &body, String &file_id_out) 
     }
     found = pos;
     search = pos + (int)key.length();
+    count++;
+    if (count >= 2) break; // Stop after finding the 2nd one (usually ~320px w/h)
   }
 
   if (found < 0) {
@@ -324,6 +339,29 @@ void transport_telegram_init() {
   Serial.println("[tg] transport initialized");
 }
 
+static String json_escape_string(const String &src) {
+  String out;
+  out.reserve(src.length() * 1.2);
+
+  for (size_t i = 0; i < src.length(); i++) {
+    const char c = src[i];
+    switch (c) {
+      case '"':  out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '\t': out += "\\t"; break;
+      case '\b': out += "\\b"; break;
+      case '\f': out += "\\f"; break;
+      default:
+        // Pass UTF-8 through directly
+        out += c;
+        break;
+    }
+  }
+  return out;
+}
+
 void transport_telegram_send(const String &msg) {
   if (!is_wifi_ready()) {
     ensure_wifi();
@@ -332,13 +370,17 @@ void transport_telegram_send(const String &msg) {
     }
   }
 
-  const String text = url_encode(msg);
-  const String url = String("https://api.telegram.org/bot") + TELEGRAM_BOT_TOKEN +
-                     "/sendMessage?chat_id=" + s_last_chat_id +
-                     "&text=" + text;
+  // Use JSON POST for better unicode support
+  const String url = String("https://api.telegram.org/bot") + TELEGRAM_BOT_TOKEN + "/sendMessage";
 
-  int code = 0;
-  (void)https_get(url, &code);
+  // Build JSON payload
+  String json = "{\"chat_id\":\"" + s_last_chat_id + "\",\"text\":\"";
+  json += json_escape_string(msg);
+  json += "\"}";
+
+  String response;
+  const int code = https_post_raw(url, "application/json", json, &response);
+
   Serial.print("[tg] send code=");
   Serial.println(code);
 }
@@ -391,6 +433,66 @@ bool transport_telegram_send_document(const String &filename, const String &cont
   Serial.print("[tg] sendDocument code=");
   Serial.println(code);
   return code >= 200 && code < 300;
+}
+
+// ============ STREAMING SUPPORT ============
+
+static bool extract_message_id_from_response(const String &response, String &message_id_out) {
+  return extract_escaped_string_after_key(response, "\"message_id\":\"", message_id_out);
+}
+
+String transport_telegram_send_streaming_start(const String &initial_msg) {
+  if (!is_wifi_ready()) {
+    ensure_wifi();
+    if (!is_wifi_ready()) {
+      return "";
+    }
+  }
+
+  // Send initial message
+  const String url = String("https://api.telegram.org/bot") + TELEGRAM_BOT_TOKEN + "/sendMessage";
+
+  String json = "{\"chat_id\":\"" + s_last_chat_id + "\",\"text\":\"";
+  json += json_escape_string(initial_msg);
+  json += "\"}";
+
+  String response;
+  const int code = https_post_raw(url, "application/json", json, &response);
+
+  if (code != 200) {
+    Serial.println("[tg] streaming start failed");
+    return "";
+  }
+
+  // Extract message_id from response
+  String message_id;
+  if (extract_message_id_from_response(response, message_id)) {
+    Serial.printf("[tg] streaming started, msg_id=%s\n", message_id.c_str());
+    return message_id;
+  }
+
+  return "";
+}
+
+bool transport_telegram_send_streaming_edit(const String &message_id, const String &new_text) {
+  if (!is_wifi_ready()) {
+    return false;
+  }
+
+  if (message_id.length() == 0) {
+    return false;
+  }
+
+  const String url = String("https://api.telegram.org/bot") + TELEGRAM_BOT_TOKEN + "/editMessageText";
+
+  String json = "{\"chat_id\":\"" + s_last_chat_id + "\",\"message_id\":\"" + message_id + "\",\"text\":\"";
+  json += json_escape_string(new_text);
+  json += "\"}";
+
+  String response;
+  const int code = https_post_raw(url, "application/json", json, &response);
+
+  return (code >= 200 && code < 300);
 }
 
 void transport_telegram_poll(incoming_cb_t cb) {

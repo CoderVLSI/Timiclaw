@@ -18,6 +18,7 @@
 #include "task_store.h"
 #include "transport_telegram.h"
 #include "web_job_client.h"
+#include "web_server.h"
 #include "email_client.h"
 #include "usage_stats.h"
 
@@ -170,57 +171,46 @@ bool relay_set_now(int pin, int state, String &out) {
 }
 
 void build_help_text(String &out) {
-      "Commands:\n"
-      "status\n"
-      "help\n"
-      "health\n"
-      "specs\n"
-      "usage\n"
-      "security\n"
-      "update [url]\n"
+  out += "🦖 Timi Commands:\n\n";
+  out += "/status - Show system status\n";
+  out += "/help - Show this help\n";
+  out += "/health - Check health\n";
+  out += "/specs - Show specs\n";
+  out += "/usage - Show usage stats\n";
+  out += "/update [url] - Update firmware\n";
 #if ENABLE_GPIO
-      "relay_set <pin> <0|1> (requires confirm)\n"
-      "flash_led [1-20] (requires confirm)\n"
+  out += "/relay_set <pin> <0|1> - Control relay\n";
+  out += "/flash_led [count] - Blink LED\n";
 #endif
-      "reminder_set_daily <HH:MM> <message>\n"
-      "reminder_show | reminder_clear\n"
+  out += "/reminder_set_daily <HH:MM> <msg> - Set reminder\n";
+  out += "/reminder_show - Show reminders\n";
+  out += "/reminder_clear - Clear reminders\n";
 #if ENABLE_WEB_JOBS
-      "webjob_set_daily <HH:MM> <task>\n"
-      "webjob_show | webjob_run | webjob_clear\n"
-      "web_files_make [topic]\n"
+  out += "/web_files_make [topic] - Generate web files\n";
 #endif
-      "timezone_show | timezone_set <Zone> | timezone_clear\n"
-#if ENABLE_TASKS
-      "task_add <text> | task_list | task_done <id> | task_clear\n"
-#endif
+  out += "/timezone_show - Show timezone\n";
+  out += "/timezone_set <zone> - Set timezone\n";
 #if ENABLE_EMAIL
-      "email_draft <to>|<subject>|<body> | email_show | email_clear\n"
-      "send_email <to> <subject> <message>\n"
+  out += "/email_draft <to>|<subject>|<body> - Draft email\n";
+  out += "/send_email <to> <subject> <msg> - Send email\n";
+  out += "/email_code [email] - Email last code\n";
 #endif
-      "safe_mode | safe_mode_on | safe_mode_off\n"
-      "logs | logs_clear\n"
-      "time_show\n"
-      "soul_show | soul_set <text> | soul_clear\n"
-      "heartbeat_show | heartbeat_set <text> | heartbeat_clear\n"
-#if ENABLE_IMAGE_GEN
-      "generate_image <prompt>\n"
-#endif
-#if ENABLE_EMAIL
-      "email_code [to email]\n"
-#endif
-      "confirm [id]\n"
-      "cancel\n"
-#if ENABLE_GPIO
-      "sensor_read <pin>\n"
-#endif
-#if ENABLE_PLAN
-      "plan <task>\n"
-#endif
-      "remember <note> | memory | forget\n"
-      "file_memory | memory_read | memory_write <text>\n"
-      "user_read | daily_note <text>\n"
-      "model list | model status | model use <provider>\n"
-      "model set <provider> <api_key> | model clear <provider>";
+  out += "/safe_mode - Toggle safe mode\n";
+  out += "/logs - Show logs\n";
+  out += "/logs_clear - Clear logs\n";
+  out += "/time_show - Show current time\n";
+  out += "/soul_show - Show soul\n";
+  out += "/soul_set <text> - Update soul\n";
+  out += "/remember <note> - Remember something\n";
+  out += "/memory - Show long-term memory\n";
+  out += "/forget - Clear memory\n";
+  out += "/model list - List available models\n";
+  out += "/model status - Show current model\n";
+  out += "/model use <provider> - Switch model provider\n";
+  out += "/model set <provider> <key> - Set API key\n";
+  out += "/model select <provider> <model> - Set model name\n";
+  out += "/model clear <provider> - Clear API key\n";
+  out += "\n💬 Just chat with me normally too! I'll use tools when needed.";
 }
 
 String wifi_health_line() {
@@ -797,7 +787,8 @@ static bool extract_web_files_topic_from_text(const String &input, String &topic
 
   const bool asks_build = (lc.indexOf("make") >= 0) || (lc.indexOf("create") >= 0) ||
                           (lc.indexOf("build") >= 0) || (lc.indexOf("generate") >= 0) ||
-                          (lc.indexOf("gen ") >= 0);
+                          (lc.indexOf("gen ") >= 0) || (lc.indexOf("send") >= 0) ||
+                          (lc.indexOf("give") >= 0) || (lc.indexOf("get") >= 0);
   const bool has_html = (lc.indexOf("html") >= 0) || (lc.indexOf("htm l") >= 0) ||
                         (lc.indexOf("webpage") >= 0) || (lc.indexOf("web page") >= 0);
   const bool has_css = (lc.indexOf("css") >= 0) || (lc.indexOf("style") >= 0);
@@ -975,6 +966,12 @@ static bool send_small_web_files(const String &topic, String &out) {
   String js;
   build_small_web_files(topic, html, css, js);
 
+  // Publish files to web server
+  web_server_publish_file("index.html", html, "text/html");
+  web_server_publish_file("styles.css", css, "text/css");
+  web_server_publish_file("script.js", js, "application/javascript");
+
+  // Send files via Telegram too
   bool ok_html = transport_telegram_send_document("index.html", html, "text/html",
                                                   "Generated HTML");
   delay(120);
@@ -990,7 +987,11 @@ static bool send_small_web_files(const String &topic, String &out) {
   }
 
   event_log_append("WEBFILES sent topic=" + topic);
-  out = "Sent small web files for \"" + topic + "\".\nFiles: index.html, styles.css, script.js";
+
+  // Include web server URL
+  String server_url = web_server_get_url();
+  out = "Sent small web files for \"" + topic + "\".\nFiles: index.html, styles.css, script.js\n\n";
+  out += "🌐 Site live at: " + server_url;
   return true;
 }
 
@@ -2312,6 +2313,75 @@ bool tool_registry_execute(const String &input, String &out) {
     return run_webjob_now_task(web_query, out);
   }
 #endif
+
+  // HOST / SERVE / DEPLOY - publish last response as web page (always available)
+  if (cmd_lc == "host_code" || cmd_lc.startsWith("host_code ") ||
+      cmd_lc.startsWith("host ") || cmd_lc == "host" ||
+      cmd_lc.startsWith("serve ") || cmd_lc == "serve" ||
+      cmd_lc.startsWith("deploy ") || cmd_lc == "deploy" ||
+      cmd_lc.indexOf("host the") >= 0 || cmd_lc.indexOf("host this") >= 0 ||
+      cmd_lc.indexOf("host it") >= 0 || cmd_lc.indexOf("serve the") >= 0 ||
+      cmd_lc.indexOf("serve this") >= 0 || cmd_lc.indexOf("serve it") >= 0 ||
+      cmd_lc.indexOf("deploy the") >= 0 || cmd_lc.indexOf("deploy this") >= 0 ||
+      cmd_lc.indexOf("deploy it") >= 0 ||
+      (cmd_lc.indexOf("host") >= 0 && cmd_lc.indexOf("server") >= 0)) {
+    String last_resp = agent_loop_get_last_response();
+    if (last_resp.length() == 0) {
+      out = "No previous response to host. Ask me to create something first!";
+      return true;
+    }
+
+    // Try to extract HTML from code blocks
+    String html_content = "";
+    int start = last_resp.indexOf("```html");
+    if (start >= 0) {
+      start = last_resp.indexOf('\n', start) + 1;
+      int end = last_resp.indexOf("```", start);
+      if (end > start) {
+        html_content = last_resp.substring(start, end);
+      }
+    }
+
+    // Fallback: if response itself looks like HTML
+    if (html_content.length() == 0) {
+      String lc = last_resp;
+      lc.toLowerCase();
+      if (lc.indexOf("<html") >= 0 || lc.indexOf("<!doctype") >= 0) {
+        html_content = last_resp;
+      }
+    }
+
+    // Try extracting any code block as HTML if it contains HTML tags
+    if (html_content.length() == 0) {
+      int cb_start = last_resp.indexOf("```");
+      if (cb_start >= 0) {
+        cb_start = last_resp.indexOf('\n', cb_start) + 1;
+        int cb_end = last_resp.indexOf("```", cb_start);
+        if (cb_end > cb_start) {
+          String block = last_resp.substring(cb_start, cb_end);
+          String block_lc = block;
+          block_lc.toLowerCase();
+          if (block_lc.indexOf("<") >= 0 && block_lc.indexOf(">") >= 0) {
+            html_content = block;
+          }
+        }
+      }
+    }
+
+    if (html_content.length() == 0) {
+      out = "Could not find HTML content in the last response. Ask me to create a website first!";
+      return true;
+    }
+
+    html_content.trim();
+    web_server_publish_file("index.html", html_content, "text/html");
+
+    // Get IP for the URL
+    String ip = WiFi.localIP().toString();
+    out = "Website hosted on ESP32!\nAccess it at: http://" + ip + "/index.html";
+    return true;
+  }
+
   if (cmd_lc.indexOf("search web") >= 0 || cmd_lc.indexOf("web search") >= 0) {
     out = "Yes. Tell me what to search.\nExample: search for cricket matches today";
     return true;
@@ -3006,7 +3076,18 @@ bool tool_registry_execute(const String &input, String &out) {
   if (cmd_lc.indexOf("summarize") >= 0 || cmd_lc.indexOf("analyse") >= 0 ||
       cmd_lc.indexOf("analyze") >= 0 || cmd_lc.indexOf("describe") >= 0 ||
       cmd_lc.indexOf("explain") >= 0 || cmd_lc.indexOf("read this") >= 0 ||
-      cmd_lc.startsWith("what is in") || cmd_lc.startsWith("what's in")) {
+      cmd_lc.startsWith("what is in") || cmd_lc.startsWith("what's in") ||
+      cmd_lc.startsWith("what is this") || cmd_lc.startsWith("what's this") ||
+      cmd_lc.startsWith("what does this") || cmd_lc.startsWith("what do you see") ||
+      cmd_lc.startsWith("look at") || cmd_lc.startsWith("check this") ||
+      cmd_lc.startsWith("tell me about") || cmd_lc.startsWith("what can you see") ||
+      cmd_lc.indexOf("this image") >= 0 || cmd_lc.indexOf("this photo") >= 0 ||
+      cmd_lc.indexOf("this picture") >= 0 || cmd_lc.indexOf("this file") >= 0 ||
+      cmd_lc.indexOf("this document") >= 0 || cmd_lc.indexOf("this pdf") >= 0 ||
+      cmd_lc.indexOf("can you see") >= 0 || cmd_lc.indexOf("identify") >= 0 ||
+      cmd_lc.indexOf("recognize") >= 0 || cmd_lc.indexOf("recognise") >= 0 ||
+      cmd_lc.indexOf("translate") >= 0 || cmd_lc.indexOf("ocr") >= 0 ||
+      cmd_lc.indexOf("extract text") >= 0) {
     
     // Check for document first (PDFs etc)
     String doc_name, doc_mime, doc_b64, doc_err;
@@ -3039,10 +3120,39 @@ bool tool_registry_execute(const String &input, String &out) {
 #endif
 
   // Model management commands
-  if (cmd_lc == "model list" || cmd_lc == "model_list") {
+  if (cmd_lc == "model list" || cmd_lc == "model_list" ||
+      cmd_lc.startsWith("model list ") || cmd_lc.startsWith("model_list ")) {
+    // Check if provider is specified
+    String provider = "";
+    if (cmd_lc.startsWith("model list ")) {
+      provider = cmd.substring(11);
+    } else if (cmd_lc.startsWith("model_list ")) {
+      provider = cmd.substring(11);
+    }
+    provider.trim();
+
+    if (provider.length() > 0) {
+      provider.toLowerCase();
+      // Fetch models from provider
+      if (provider == "openrouter" || provider == "openrouter.ai") {
+        String models, err;
+        if (llm_fetch_provider_models("openrouter", models, err)) {
+          out = models;
+        } else {
+          out = "ERR: " + err;
+        }
+        return true;
+      } else {
+        out = "ERR: Model listing only supported for OpenRouter.\n"
+              "Usage: model list openrouter";
+        return true;
+      }
+    }
+
+    // No provider specified, show configured providers
     String configured = model_config_get_configured_list();
     out = "Configured providers:\n" + configured +
-          "\n\nUse: model use <provider> to switch";
+          "\n\nUse: model list openrouter to see available models";
     return true;
   }
 
@@ -3117,6 +3227,37 @@ bool tool_registry_execute(const String &input, String &out) {
       return true;
     }
     out = "OK: configuration cleared for " + provider;
+    return true;
+  }
+
+  if (cmd_lc.startsWith("model select ") || cmd_lc.startsWith("model_select ")) {
+    String tail = cmd.length() > 12 ? cmd.substring(12) : "";
+    tail.trim();
+    if (tail.length() == 0) {
+      out = "ERR: usage model select <provider> <model_name>\n"
+            "Example: model select openrouter google/gemini-2.0-flash-exp:free";
+      return true;
+    }
+    int first_space = tail.indexOf(' ');
+    if (first_space < 0) {
+      out = "ERR: usage model select <provider> <model_name>\n"
+            "Example: model select openrouter google/gemini-2.0-flash-exp:free";
+      return true;
+    }
+    String provider = tail.substring(0, first_space);
+    String model_name = tail.substring(first_space + 1);
+    provider.trim();
+    model_name.trim();
+    if (model_name.length() == 0) {
+      out = "ERR: model name cannot be empty";
+      return true;
+    }
+    String err;
+    if (!model_config_set_model(provider, model_name, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = "OK: model for " + provider + " set to " + model_name;
     return true;
   }
 

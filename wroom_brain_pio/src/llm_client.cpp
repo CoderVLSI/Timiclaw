@@ -379,6 +379,38 @@ bool call_glm_zai(const String &endpoint_url, const String &api_key, const Strin
   return true;
 }
 
+bool call_ollama(const String &base_url, const String &model,
+                 const String &system_prompt, const String &task,
+                 String &response_out, String &error_out) {
+  // Ollama uses /api/chat or /api/generate endpoint
+  String url = base_url;
+  if (!url.endsWith("/api/chat") && !url.endsWith("/api/generate")) {
+    // Prefer /api/chat for OpenAI-compatible format
+    url = join_url(base_url, "/api/chat");
+  }
+
+  // Ollama /api/chat uses OpenAI-compatible format
+  const String body = String("{\"model\":\"") + json_escape(model) +
+                      "\",\"messages\":[{\"role\":\"system\",\"content\":\"" +
+                      json_escape(system_prompt) + "\"},{\"role\":\"user\",\"content\":\"" +
+                      json_escape(task) + "\"}],\"stream\":false}";
+
+  // Ollama doesn't use API key, pass empty string
+  const HttpResult res = http_post_json(url, body);
+  if (res.status_code < 200 || res.status_code >= 300) {
+    error_out = "Ollama HTTP " + String(res.status_code);
+    return false;
+  }
+
+  // Ollama /api/chat returns OpenAI-compatible format
+  if (!parse_response_text(res.body, response_out)) {
+    error_out = "Could not parse Ollama response";
+    return false;
+  }
+
+  return true;
+}
+
 // Check if an error indicates quota/rate limit (should trigger fallback)
 static bool is_quota_error(const String &error) {
   String lc = error;
@@ -418,6 +450,18 @@ static bool try_provider(const String &provider, const String &model,
     String mod = model.length() > 0 ? model : String("glm-4.7");
     String baseUrl = String(LLM_GLM_BASE_URL);
     return call_glm_zai(baseUrl, "", mod, system_prompt, task, response_out, error_out);
+  }
+
+  if (prov == "openrouter" || prov == "openrouter.ai") {
+    String mod = model.length() > 0 ? model : String("qwen/qwen-2.5-coder-32b-instruct:free");
+    String baseUrl = "https://openrouter.ai/api";
+    return call_openai_like(baseUrl, "", mod, system_prompt, task, response_out, error_out);
+  }
+
+  if (prov == "ollama") {
+    String mod = model.length() > 0 ? model : String("llama3");
+    String baseUrl = "http://ollama.local:11434/api/generate";
+    return call_ollama(baseUrl, mod, system_prompt, task, response_out, error_out);
   }
 
   error_out = "Unsupported provider: " + provider;
@@ -501,6 +545,15 @@ bool llm_generate_with_prompt(const String &system_prompt, const String &task, b
       String mod = model.length() > 0 ? model : String("glm-4.7");
       String baseUrl = config.baseUrl.length() > 0 ? config.baseUrl : String(LLM_GLM_BASE_URL);
       result = call_glm_zai(baseUrl, api_key, mod, system_prompt, enriched_task, response_out, error_out);
+    } else if (prov == "openrouter" || prov == "openrouter.ai") {
+      // OpenRouter uses OpenAI-compatible API
+      String mod = model.length() > 0 ? model : String("qwen/qwen-2.5-coder-32b-instruct:free");
+      String baseUrl = config.baseUrl.length() > 0 ? config.baseUrl : String("https://openrouter.ai/api");
+      result = call_openai_like(baseUrl, api_key, mod, system_prompt, enriched_task, response_out, error_out);
+    } else if (prov == "ollama") {
+      String mod = model.length() > 0 ? model : String("llama3");
+      String baseUrl = config.baseUrl.length() > 0 ? config.baseUrl : String("http://ollama.local:11434/api/generate");
+      result = call_ollama(baseUrl, mod, system_prompt, enriched_task, response_out, error_out);
     } else {
       error_out = "Unsupported provider: " + provider;
       if (using_fallback) {
@@ -674,6 +727,14 @@ bool llm_generate_with_custom_prompt(const String &system_prompt, const String &
     String mod = primary_model.length() > 0 ? primary_model : String("glm-4.7");
     String baseUrl = config.baseUrl.length() > 0 ? config.baseUrl : String(LLM_GLM_BASE_URL);
     result = call_glm_zai(baseUrl, primary_key, mod, system_prompt, enriched_task, reply_out, error_out);
+  } else if (prov == "openrouter" || prov == "openrouter.ai") {
+    String mod = primary_model.length() > 0 ? primary_model : String("qwen/qwen-2.5-coder-32b-instruct:free");
+    String baseUrl = config.baseUrl.length() > 0 ? config.baseUrl : String("https://openrouter.ai/api");
+    result = call_openai_like(baseUrl, primary_key, mod, system_prompt, enriched_task, reply_out, error_out);
+  } else if (prov == "ollama") {
+    String mod = primary_model.length() > 0 ? primary_model : String("llama3");
+    String baseUrl = config.baseUrl.length() > 0 ? config.baseUrl : String("http://ollama.local:11434/api/generate");
+    result = call_ollama(baseUrl, mod, system_prompt, enriched_task, reply_out, error_out);
   } else {
     error_out = "Unsupported provider: " + primary_provider;
     return false;
@@ -718,18 +779,15 @@ bool llm_generate_reply(const String &message, String &reply_out, String &error_
   String task = message;
   String msg_lc = message;
   msg_lc.toLowerCase();
-  const bool likely_followup = (msg_lc.indexOf("it") >= 0) || (msg_lc.indexOf("that") >= 0) ||
-                               (msg_lc.indexOf("this") >= 0) || (msg_lc.indexOf("again") >= 0) ||
-                               (msg_lc.indexOf("continue") >= 0) || (msg_lc.indexOf("same") >= 0) ||
-                               (msg_lc.indexOf("previous") >= 0) || (msg_lc.indexOf("above") >= 0) ||
-                               (msg_lc.indexOf("last") >= 0) || (msg_lc.startsWith("and ")) ||
-                               (msg_lc.startsWith("also "));
+
+  // Always include recent chat history for better context and follow-ups
+  // History is stored in NVS and persists across reboots
   String history;
   String history_err;
-  if (likely_followup && chat_history_get(history, history_err)) {
+  if (chat_history_get(history, history_err)) {
     history.trim();
     if (history.length() > 0) {
-      task = "Recent conversation:\n" + history + "\n\nCurrent user message:\n" + message;
+      task = "Recent conversation (last 15-30 turns):\n" + history + "\n\nCurrent user message:\n" + message;
     }
   }
 
@@ -804,6 +862,30 @@ bool llm_generate_heartbeat(const String &heartbeat_doc, String &reply_out, Stri
 bool llm_route_tool_command(const String &message, String &command_out, String &error_out) {
   command_out = "";
 
+  // Direct detection for web generation (bypass LLM for reliability)
+  String lc = message;
+  lc.toLowerCase();
+
+  // Web generation keywords - route directly to web_files_make
+  if (lc.indexOf("make a website") >= 0 || lc.indexOf("make me a website") >= 0 ||
+      lc.indexOf("create a website") >= 0 || lc.indexOf("generate a website") >= 0 ||
+      lc.indexOf("build a website") >= 0 || lc.indexOf("create html") >= 0 ||
+      lc.indexOf("generate html") >= 0) {
+    // Extract the topic after the keyword
+    String topic = "custom";
+    if (lc.indexOf("hello world") >= 0) {
+      topic = "hello world";
+    } else if (lc.indexOf("portfolio") >= 0) {
+      topic = "portfolio";
+    } else if (lc.indexOf("saas") >= 0 || lc.indexOf("saas") >= 0) {
+      topic = "saas";
+    } else if (lc.indexOf("landing page") >= 0) {
+      topic = "landing page";
+    }
+    command_out = "web_files_make " + topic;
+    return true;
+  }
+
   String task = "User message:\n" + message + "\n\nReturn one line only.";
   String raw;
   if (!llm_generate_with_custom_prompt(String(kRouteSystemPrompt), task, false, raw, error_out)) {
@@ -815,9 +897,9 @@ bool llm_route_tool_command(const String &message, String &command_out, String &
     return true;
   }
 
-  String lc = routed;
-  lc.toLowerCase();
-  if (lc == "none") {
+  String lc_route = routed;
+  lc_route.toLowerCase();
+  if (lc_route == "none") {
     return true;
   }
 
@@ -992,17 +1074,22 @@ bool llm_understand_media(const String &instruction, const String &mime_type,
   // Try to get config from NVS first, fallback to .env
   String provider;
   String api_key;
+  String model;
+  String base_url;
 
   ModelConfigInfo config;
   if (model_config_get_active_config(config)) {
     provider = config.provider;
     api_key = config.apiKey;
+    model = config.model;
+    base_url = config.baseUrl;
   } else {
     provider = to_lower(String(LLM_PROVIDER));
     api_key = String(LLM_API_KEY);
+    model = String(LLM_MODEL);
   }
 
-  // Allow IMAGE_PROVIDER gemini override
+  // Allow IMAGE_PROVIDER gemini override when no provider set
   if ((provider.length() == 0 || provider == "none") &&
       to_lower(String(IMAGE_PROVIDER)) == "gemini") {
     provider = "gemini";
@@ -1014,25 +1101,21 @@ bool llm_understand_media(const String &instruction, const String &mime_type,
     api_key = String(IMAGE_API_KEY);
   }
 
-  if (provider != "gemini") {
-    error_out = "Media understanding currently requires Gemini. Use: /model use gemini";
-    return false;
-  }
   if (api_key.length() == 0) {
-    error_out = "No API key for Gemini. Use: /model set gemini <your_api_key>";
+    error_out = "No API key configured. Use: /model set <provider> <key>";
     return false;
   }
 
   String prompt = instruction;
   prompt.trim();
   if (prompt.length() == 0) {
-    prompt = "Analyze this file and return a concise summary.";
+    prompt = "Analyze this image and return a concise summary.";
   }
 
   String media_mime = mime_type;
   media_mime.trim();
   if (media_mime.length() == 0) {
-    media_mime = "application/octet-stream";
+    media_mime = "image/jpeg";
   }
 
   if (base64_data.length() == 0) {
@@ -1044,56 +1127,114 @@ bool llm_understand_media(const String &instruction, const String &mime_type,
     return false;
   }
 
-  // Get model and baseUrl from config
-  String model;
-  String gemini_base;
-  ModelConfigInfo cfg;
-  if (model_config_get_active_config(cfg) && cfg.provider == "gemini") {
-    model = cfg.model;
-    gemini_base = cfg.baseUrl;
-  } else {
-    model = String(LLM_MODEL);
-    gemini_base = String(LLM_GEMINI_BASE_URL);
+  // ── Gemini path ──
+  if (provider == "gemini") {
+    String gemini_base = base_url.length() > 0 ? base_url : String(LLM_GEMINI_BASE_URL);
+    model.trim();
+    String model_lc = model;
+    model_lc.toLowerCase();
+    if (model.length() == 0 || contains_ci(model_lc, "image-generation") ||
+        model_lc.endsWith("-image")) {
+      model = "gemini-2.0-flash";
+    }
+
+    const String url = join_url(gemini_base,
+                                String("/v1beta/models/") + model + ":generateContent");
+    const String body =
+        String("{\"contents\":[{\"parts\":[{\"text\":\"") + json_escape(prompt) +
+        "\"},{\"inlineData\":{\"mimeType\":\"" + json_escape(media_mime) +
+        "\",\"data\":\"" + base64_data +
+        "\"}}]}],\"generationConfig\":{\"temperature\":0.2}}";
+
+    const HttpResult res = http_post_json(url, body, "x-goog-api-key", api_key);
+    if (res.status_code < 200 || res.status_code >= 300) {
+      error_out = summarize_http_error("Gemini media", res);
+      usage_record_call("media", res.status_code, "gemini", model.c_str());
+      return false;
+    }
+
+    if (!parse_response_text(res.body, reply_out)) {
+      error_out = "Could not parse Gemini media response";
+      usage_record_call("media", 500, "gemini", model.c_str());
+      return false;
+    }
+
+    reply_out.trim();
+    if (reply_out.length() == 0) {
+      error_out = "Empty Gemini media response";
+      usage_record_call("media", 500, "gemini", model.c_str());
+      return false;
+    }
+
+    usage_record_call("media", 200, "gemini", model.c_str());
+    return true;
   }
 
-  model.trim();
-  String model_lc = model;
-  model_lc.toLowerCase();
-  if (model.length() == 0 || contains_ci(model_lc, "image-generation") ||
-      model_lc.endsWith("-image")) {
-    model = "gemini-2.0-flash";
+  // ── OpenRouter / OpenAI / Anthropic path (OpenAI-compatible vision API) ──
+  if (provider == "openrouter" || provider == "openrouter.ai" ||
+      provider == "openai" || provider == "anthropic") {
+
+    String vision_base;
+    String vision_model = model;
+
+    if (provider == "openrouter" || provider == "openrouter.ai") {
+      vision_base = base_url.length() > 0 ? base_url : String("https://openrouter.ai/api");
+      if (vision_model.length() == 0) {
+        vision_model = "qwen/qwen-2.5-coder-32b-instruct:free";
+      }
+    } else if (provider == "openai") {
+      vision_base = base_url.length() > 0 ? base_url : String(LLM_OPENAI_BASE_URL);
+      if (vision_model.length() == 0) {
+        vision_model = "gpt-4o-mini";
+      }
+    } else {
+      // Anthropic via OpenRouter-compatible endpoint
+      vision_base = base_url.length() > 0 ? base_url : String(LLM_ANTHROPIC_BASE_URL);
+      if (vision_model.length() == 0) {
+        vision_model = "claude-3-haiku-20240307";
+      }
+    }
+
+    const String url = join_url(vision_base, "/v1/chat/completions");
+
+    // Build data URI: data:<mime>;base64,<data>
+    const String data_uri = "data:" + media_mime + ";base64," + base64_data;
+
+    // OpenAI vision format with image_url
+    const String body =
+        String("{\"model\":\"") + json_escape(vision_model) +
+        "\",\"messages\":[{\"role\":\"user\",\"content\":[" +
+        "{\"type\":\"text\",\"text\":\"" + json_escape(prompt) + "\"}," +
+        "{\"type\":\"image_url\",\"image_url\":{\"url\":\"" + data_uri + "\"}}" +
+        "]}],\"temperature\":0.2,\"max_tokens\":1024}";
+
+    const HttpResult res =
+        http_post_json(url, body, "Authorization", "Bearer " + api_key);
+    if (res.status_code < 200 || res.status_code >= 300) {
+      error_out = summarize_http_error("Vision", res);
+      usage_record_call("media", res.status_code, provider.c_str(), vision_model.c_str());
+      return false;
+    }
+
+    if (!parse_response_text(res.body, reply_out)) {
+      error_out = "Could not parse vision response";
+      usage_record_call("media", 500, provider.c_str(), vision_model.c_str());
+      return false;
+    }
+
+    reply_out.trim();
+    if (reply_out.length() == 0) {
+      error_out = "Empty vision response";
+      usage_record_call("media", 500, provider.c_str(), vision_model.c_str());
+      return false;
+    }
+
+    usage_record_call("media", 200, provider.c_str(), vision_model.c_str());
+    return true;
   }
 
-  const String url = join_url(gemini_base,
-                              String("/v1beta/models/") + model + ":generateContent");
-  const String body =
-      String("{\"contents\":[{\"parts\":[{\"text\":\"") + json_escape(prompt) +
-      "\"},{\"inlineData\":{\"mimeType\":\"" + json_escape(media_mime) +
-      "\",\"data\":\"" + base64_data +
-      "\"}}]}],\"generationConfig\":{\"temperature\":0.2}}";
-
-  const HttpResult res = http_post_json(url, body, "x-goog-api-key", api_key);
-  if (res.status_code < 200 || res.status_code >= 300) {
-    error_out = summarize_http_error("Gemini media", res);
-    usage_record_call("media", res.status_code, "gemini", model.c_str());
-    return false;
-  }
-
-  if (!parse_response_text(res.body, reply_out)) {
-    error_out = "Could not parse Gemini media response";
-    usage_record_call("media", 500, "gemini", model.c_str());
-    return false;
-  }
-
-  reply_out.trim();
-  if (reply_out.length() == 0) {
-    error_out = "Empty Gemini media response";
-    usage_record_call("media", 500, "gemini", model.c_str());
-    return false;
-  }
-
-  usage_record_call("media", 200, "gemini", model.c_str());
-  return true;
+  error_out = "Vision not supported for provider: " + provider + ". Use openrouter, openai, or gemini.";
+  return false;
 }
 
 #endif  // ENABLE_MEDIA_UNDERSTANDING
@@ -1422,5 +1563,120 @@ bool llm_parse_update_request(const String &message, String &url_out, bool &shou
 
   error_out = "Update parsing not supported for provider: " + provider;
   return false;
+}
+
+bool llm_fetch_provider_models(const String &provider, String &models_out, String &error_out) {
+  String prov_lc = to_lower(provider);
+
+  if (prov_lc != "openrouter" && prov_lc != "openrouter.ai") {
+    error_out = "Model listing only supported for OpenRouter. Use: model list openrouter";
+    return false;
+  }
+
+  // Get OpenRouter API key
+  String api_key = model_config_get_api_key("openrouter");
+  if (api_key.length() == 0) {
+    error_out = "No OpenRouter API key configured. Use: model set openrouter <your_api_key>";
+    return false;
+  }
+
+  // Fetch models from OpenRouter
+  if (WiFi.status() != WL_CONNECTED) {
+    error_out = "WiFi not connected";
+    return false;
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient https;
+  const String url = "https://openrouter.ai/api/v1/models";
+  if (!https.begin(client, url)) {
+    error_out = "HTTP begin failed";
+    return false;
+  }
+
+  https.setConnectTimeout(12000);
+  https.setTimeout(15000);
+  https.addHeader("Authorization", "Bearer " + api_key);
+
+  int status_code = https.GET();
+  String body = "";
+  if (status_code > 0) {
+    body = https.getString();
+  } else {
+    error_out = "HTTP request failed: " + https.errorToString(status_code);
+    https.end();
+    return false;
+  }
+  https.end();
+
+  if (status_code < 200 || status_code >= 300) {
+    error_out = "OpenRouter HTTP " + String(status_code);
+    return false;
+  }
+
+  // Parse models from JSON response
+  // Format: {"data":[{"id":"model-name","name":"Display Name",...},...]}
+  models_out = "📋 OpenRouter Available Models:\n\n";
+
+  int data_start = body.indexOf("\"data\":");
+  if (data_start < 0) {
+    error_out = "Could not parse OpenRouter response";
+    return false;
+  }
+
+  // Find each model object
+  int search_pos = data_start + 6;  // Skip "data":
+  int count = 0;
+  const int max_models = 30;  // Limit to prevent overflow
+
+  while (count < max_models) {
+    int id_start = body.indexOf("\"id\":", search_pos);
+    if (id_start < 0) break;
+
+    int id_val_start = body.indexOf("\"", id_start + 5);
+    if (id_val_start < 0) break;
+    id_val_start++;  // Skip opening quote
+
+    int id_val_end = body.indexOf("\"", id_val_start);
+    if (id_val_end < 0) break;
+
+    String model_id = body.substring(id_val_start, id_val_end);
+
+    // Try to find the name field too
+    int name_start = body.indexOf("\"name\":", id_val_end);
+    String model_name = model_id;
+    if (name_start > 0 && name_start < id_val_end + 200) {  // Within reasonable distance
+      int name_val_start = body.indexOf("\"", name_start + 7);
+      if (name_val_start > 0) {
+        name_val_start++;
+        int name_val_end = body.indexOf("\"", name_val_start);
+        if (name_val_end > 0) {
+          model_name = body.substring(name_val_start, name_val_end);
+        }
+      }
+    }
+
+    models_out += String("• ") + model_id;
+    if (model_name != model_id) {
+      models_out += " (" + model_name + ")";
+    }
+    models_out += "\n";
+
+    search_pos = id_val_end + 1;
+    count++;
+
+    // Check if we've reached the end of the array
+    if (body[search_pos] == ']') break;
+  }
+
+  if (count == 0) {
+    error_out = "No models found";
+    return false;
+  }
+
+  models_out += "\nShowing " + String(count) + " models.";
+  return true;
 }
 

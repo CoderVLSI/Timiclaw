@@ -18,6 +18,8 @@ const char *kOpenaiKeyPrefix = "openai_";
 const char *kAnthropicKeyPrefix = "anthropic_";
 const char *kGeminiKeyPrefix = "gemini_";
 const char *kGlmKeyPrefix = "glm_";
+const char *kOpenRouterKeyPrefix = "or_";
+const char *kOllamaKeyPrefix = "ollama_";
 
 // Value suffixes
 const char *kApiKeySuffix = "key";
@@ -28,8 +30,8 @@ const char *kFailedTimeSuffix = "_failed";
 const char *kFailedStatusSuffix = "_status";
 
 // Provider priority for fallback (in order)
-const char *kProviderPriority[] = {"gemini", "openai", "anthropic", "glm"};
-const size_t kProviderPriorityCount = 4;
+const char *kProviderPriority[] = {"gemini", "openai", "anthropic", "glm", "openrouter", "ollama"};
+const size_t kProviderPriorityCount = 6;
 
 String to_lower(String value) {
   value.toLowerCase();
@@ -54,6 +56,12 @@ String get_provider_prefix(const String &provider) {
   if (lc == "glm") {
     return kGlmKeyPrefix;
   }
+  if (lc == "openrouter" || lc == "openrouter.ai") {
+    return kOpenRouterKeyPrefix;
+  }
+  if (lc == "ollama") {
+    return kOllamaKeyPrefix;
+  }
   return "";
 }
 
@@ -71,6 +79,13 @@ String get_provider_base_url(const String &provider) {
   if (lc == "glm") {
     return String(LLM_GLM_BASE_URL);
   }
+  if (lc == "openrouter" || lc == "openrouter.ai") {
+    return "https://openrouter.ai/api";
+  }
+  if (lc == "ollama") {
+    // Default Ollama endpoint - user can configure their local IP
+    return "http://ollama.local:11434/api/generate";
+  }
   return "";
 }
 
@@ -87,6 +102,12 @@ String get_default_model(const String &provider) {
   }
   if (lc == "glm") {
     return "glm-4.7";
+  }
+  if (lc == "openrouter" || lc == "openrouter.ai") {
+    return "qwen/qwen-2.5-coder-32b-instruct:free";  // Strong free model
+  }
+  if (lc == "ollama") {
+    return "llama3";  // Most common local model
   }
   return "";
 }
@@ -145,8 +166,9 @@ bool model_config_set_active_provider(const String &provider, String &error_out)
   }
 
   String lc = to_lower(provider);
-  if (lc != "openai" && lc != "anthropic" && lc != "gemini" && lc != "glm" && lc != "none") {
-    error_out = "Invalid provider. Use: openai, anthropic, gemini, glm, none";
+  if (lc != "openai" && lc != "anthropic" && lc != "gemini" && lc != "glm" && lc != "none" &&
+      lc != "openrouter" && lc != "openrouter.ai" && lc != "ollama") {
+    error_out = "Invalid provider. Use: openai, anthropic, gemini, glm, openrouter, ollama, none";
     return false;
   }
 
@@ -190,7 +212,7 @@ bool model_config_set_api_key(const String &provider, const String &key, String 
 
   String prefix = get_provider_prefix(provider);
   if (prefix.length() == 0) {
-    error_out = "Invalid provider. Use: openai, anthropic, gemini, glm";
+    error_out = "Invalid provider. Use: openai, anthropic, gemini, glm, openrouter, ollama";
     return false;
   }
 
@@ -244,7 +266,7 @@ bool model_config_set_model(const String &provider, const String &model, String 
 
   String prefix = get_provider_prefix(provider);
   if (prefix.length() == 0) {
-    error_out = "Invalid provider. Use: openai, anthropic, gemini, glm";
+    error_out = "Invalid provider. Use: openai, anthropic, gemini, glm, openrouter, ollama";
     return false;
   }
 
@@ -272,9 +294,9 @@ bool model_config_is_provider_configured(const String &provider) {
 
 String model_config_get_configured_list() {
   String result = "";
-  const char *providers[] = {"openai", "anthropic", "gemini", "glm"};
+  const char *providers[] = {"openai", "anthropic", "gemini", "glm", "openrouter", "ollama"};
 
-  for (size_t i = 0; i < 4; i++) {
+  for (size_t i = 0; i < 6; i++) {
     String provider = providers[i];
     if (model_config_is_provider_configured(provider)) {
       if (result.length() > 0) {
@@ -297,9 +319,9 @@ String model_config_get_status_summary() {
   result += "Active: " + (active.length() > 0 ? active : "(none)") + "\n\n";
 
   result += "Configured providers:\n";
-  const char *providers[] = {"openai", "anthropic", "gemini", "glm"};
+  const char *providers[] = {"openai", "anthropic", "gemini", "glm", "openrouter", "ollama"};
 
-  for (size_t i = 0; i < 4; i++) {
+  for (size_t i = 0; i < 6; i++) {
     String provider = providers[i];
     bool configured = model_config_is_provider_configured(provider);
     String model = model_config_get_model(provider);
@@ -334,7 +356,7 @@ bool model_config_clear_provider(const String &provider, String &error_out) {
 
   String prefix = get_provider_prefix(provider);
   if (prefix.length() == 0) {
-    error_out = "Invalid provider. Use: openai, anthropic, gemini, glm";
+    error_out = "Invalid provider. Use: openai, anthropic, gemini, glm, openrouter, ollama";
     return false;
   }
 

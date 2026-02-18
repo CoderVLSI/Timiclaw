@@ -16,6 +16,7 @@
 #include "tool_registry.h"
 #include "transport_telegram.h"
 #include "usage_stats.h"
+#include "web_server.h"
 #include "react_agent.h"
 
 // Store last LLM response for emailing code
@@ -52,6 +53,8 @@ static bool should_try_route(const String &msg) {
       "forget",     "flash ",     "blink ",     "led ",       "sensor ",    "relay ",
       "safe mode",  "email ",     "plan ",      "confirm",    "cancel",      "create ",
       "build ",     "make ",      "generate ",  "update",     "upgrade",    "firmware",
+      "website",    "html",       "web ",       "saas",       "landing",    "portfolio",
+      "host ",      "serve ",     "deploy ",
   };
 
   for (size_t i = 0; i < (sizeof(prefixes) / sizeof(prefixes[0])); i++) {
@@ -80,9 +83,294 @@ static void record_chat_turn(const String &incoming, const String &outgoing) {
   chat_history_append('A', outgoing, err);
 }
 
+// Detect language from code content if not specified
+static String detect_language_from_content(const String &code) {
+  String lc = code;
+  lc.toLowerCase();
+
+  // HTML patterns
+  if (lc.indexOf("<!doctype html") >= 0 || lc.indexOf("<html") >= 0 || lc.indexOf("<div") >= 0 || lc.indexOf("<body") >= 0) {
+    // Check if it also has script/style tags (might be full HTML)
+    if (lc.indexOf("<style") >= 0 || lc.indexOf("<script") >= 0) {
+      return "html_full";
+    }
+    return "html";
+  }
+
+  // CSS patterns
+  if (lc.indexOf("{") >= 0 && lc.indexOf("}") >= 0 && lc.indexOf(":") >= 0 &&
+      (lc.indexOf("margin") >= 0 || lc.indexOf("padding") >= 0 ||
+       lc.indexOf("background") >= 0 || lc.indexOf("display:") >= 0 ||
+       lc.indexOf("color:") >= 0 || lc.indexOf("font-") >= 0 ||
+       lc.indexOf("border") >= 0 || lc.indexOf("flex") >= 0 ||
+       lc.indexOf("@media") >= 0 || lc.indexOf("@keyframes") >= 0)) {
+    return "css";
+  }
+
+  // JavaScript patterns
+  if (lc.indexOf("function ") >= 0 || lc.indexOf("const ") >= 0 || lc.indexOf("let ") >= 0 || lc.indexOf("=>") >= 0 || lc.indexOf("console.log") >= 0 || lc.indexOf("document.") >= 0) {
+    return "js";
+  }
+
+  // Python patterns
+  if (lc.indexOf("def ") >= 0 || lc.indexOf("import ") >= 0 || lc.indexOf("print(") >= 0 || lc.indexOf("self.") >= 0) {
+    return "py";
+  }
+
+  // C/C++ patterns
+  if (lc.indexOf("#include") >= 0 || (lc.indexOf("int main") >= 0 && lc.indexOf("{") >= 0)) {
+    if (lc.indexOf("class ") >= 0 || lc.indexOf("public:") >= 0 || lc.indexOf("namespace") >= 0) {
+      return "cpp";
+    }
+    return "c";
+  }
+
+  return "";
+}
+
+// Extract code blocks from LLM response and send as files
+// Returns number of code files sent
+static int extract_and_send_code_blocks(const String &response) {
+  int files_sent = 0;
+  int block_start = -1;
+  String code_lang;
+  String code_content;
+
+  Serial.println("[agent] Checking for code blocks...");
+
+  for (int i = 0; i < (int)response.length() - 2; i++) {
+    // Check for code block start ```
+    if (response[i] == '`' && response[i+1] == '`' && response[i+2] == '`') {
+      if (block_start < 0) {
+        // Found opening ```
+        block_start = i + 3;
+        // Extract language (e.g., ```cpp, ```python)
+        int lang_end = block_start;
+        while (lang_end < (int)response.length() && response[lang_end] != '\n' && response[lang_end] != ' ') {
+          lang_end++;
+        }
+        code_lang = response.substring(block_start, lang_end);
+        code_lang.toLowerCase();
+        code_lang.trim();
+
+        // Handle empty language tag
+        if (code_lang.length() == 0 || code_lang == "\r" || code_lang == "\n") {
+          code_lang = "";
+        }
+
+        Serial.printf("[agent] Found code block, language: '%s'\n", code_lang.c_str());
+
+        // Find actual code start
+        while (lang_end < (int)response.length() && (response[lang_end] == ' ' || response[lang_end] == '\r')) {
+          lang_end++;
+        }
+        if (lang_end < (int)response.length() && response[lang_end] == '\n') {
+          lang_end++;
+        }
+        block_start = lang_end;
+      } else {
+        // Found closing ```
+        code_content = response.substring(block_start, i);
+        code_content.trim();
+
+        // Skip empty code blocks
+        if (code_content.length() < 10) {
+          block_start = -1;
+          continue;
+        }
+
+        // If no language specified, detect from content
+        if (code_lang.length() == 0) {
+          code_lang = detect_language_from_content(code_content);
+          Serial.printf("[agent] Auto-detected language: '%s'\n", code_lang.c_str());
+        }
+
+        // Map language to file extension
+        String ext = "txt";
+        String mime = "text/plain";
+
+        if (code_lang == "cpp" || code_lang == "c++" || code_lang == "cxx") {
+          ext = "cpp";
+          mime = "text/x-c++src";
+        } else if (code_lang == "c") {
+          ext = "c";
+          mime = "text/x-csrc";
+        } else if (code_lang == "py" || code_lang == "python") {
+          ext = "py";
+          mime = "text/x-python";
+        } else if (code_lang == "js" || code_lang == "javascript") {
+          ext = "js";
+          mime = "application/javascript";
+        } else if (code_lang == "html") {
+          ext = "html";
+          mime = "text/html";
+        } else if (code_lang == "css") {
+          ext = "css";
+          mime = "text/css";
+        } else if (code_lang == "json") {
+          ext = "json";
+          mime = "application/json";
+        } else if (code_lang == "md" || code_lang == "markdown") {
+          ext = "md";
+          mime = "text/markdown";
+        } else if (code_lang == "ino" || code_lang == "arduino") {
+          ext = "ino";
+          mime = "text/x-c++src";
+        } else if (code_lang == "h" || code_lang == "hpp") {
+          ext = code_lang;
+          mime = "text/x-csrc";
+        } else if (code_lang == "sh" || code_lang == "bash" || code_lang == "shell") {
+          ext = "sh";
+          mime = "text/x-sh";
+        } else if (code_lang == "ts" || code_lang == "typescript") {
+          ext = "ts";
+          mime = "text/typescript";
+        } else if (code_lang == "tsx" || code_lang == "jsx") {
+          ext = code_lang;
+          mime = "text/javascript";
+        } else if (code_lang == "sql") {
+          ext = "sql";
+          mime = "text/sql";
+        } else if (code_lang == "java") {
+          ext = "java";
+          mime = "text/java";
+        } else if (code_lang == "rust" || code_lang == "rs") {
+          ext = "rs";
+          mime = "text/rust";
+        } else if (code_lang == "go" || code_lang == "golang") {
+          ext = "go";
+          mime = "text/go";
+        } else if (code_lang == "xml" || code_lang == "yaml" || code_lang == "yml") {
+          ext = code_lang;
+          mime = "text/plain";
+        } else if (code_lang == "html_full") {
+          ext = "html";
+          mime = "text/html";
+        }
+
+        // Generate filename with timestamp
+        String filename = "code_" + String((unsigned long)millis()) + "_" + String(files_sent) + "." + ext;
+
+        Serial.printf("[agent] Sending code file: %s (%d bytes)\n", filename.c_str(), code_content.length());
+
+        // Send as document
+        if (transport_telegram_send_document(filename, code_content, mime, "Here's the code file:")) {
+          files_sent++;
+          Serial.printf("[agent] Code file sent successfully!\n");
+        } else {
+          Serial.printf("[agent] Failed to send code file\n");
+        }
+
+        // Reset for next code block
+        block_start = -1;
+        code_content = "";
+      }
+    }
+  }
+
+  Serial.printf("[agent] Total code files sent: %d\n", files_sent);
+  return files_sent;
+}
+
+// Send message directly (no streaming overhead)
+static void send_streaming(const String &outgoing) {
+  if (outgoing.length() == 0) {
+    return;
+  }
+  transport_telegram_send(outgoing);
+}
+
+// Check if text looks like code (even without ``` blocks)
+static bool looks_like_code(const String &text) {
+  String lc = text;
+  lc.toLowerCase();
+
+  // Code-like patterns
+  const char *code_patterns[] = {
+    "function ", "def ", "class ", "import ", "#include",
+    "public void", "private int", "const ", "let ", "var ",
+    "return ", "if (", "for (", "while (", "print(", "console.log",
+    "{", "}", "//", "/*", "*/", "#!"
+  };
+
+  // Check for multiple code patterns
+  int pattern_count = 0;
+  for (size_t i = 0; i < sizeof(code_patterns) / sizeof(code_patterns[0]); i++) {
+    if (lc.indexOf(code_patterns[i]) >= 0) {
+      pattern_count++;
+      if (pattern_count >= 2) return true;
+    }
+  }
+
+  // Check for code-like line patterns (indentation)
+  int line_count = 0;
+  int indented_lines = 0;
+  for (int i = 0; i < (int)lc.length(); i++) {
+    if (lc[i] == '\n') {
+      line_count++;
+      // Check if next non-space character is indented (4+ spaces or tab)
+      int j = i + 1;
+      int spaces = 0;
+      while (j < (int)lc.length() && (lc[j] == ' ' || lc[j] == '\t')) {
+        if (lc[j] == ' ') spaces++;
+        j++;
+      }
+      if (spaces >= 4) indented_lines++;
+    }
+  }
+
+  // Many indented lines = likely code
+  if (indented_lines >= 3 && line_count > 5) {
+    return true;
+  }
+
+  return false;
+}
+
 static void send_and_record(const String &incoming, const String &outgoing) {
   event_log_append("OUT: " + outgoing);
-  transport_telegram_send(outgoing);
+
+  // Check if response contains code blocks
+  bool has_code_blocks = false;
+  int code_count = 0;
+
+  // Count code blocks
+  for (int i = 0; i < (int)outgoing.length() - 2; i++) {
+    if (outgoing[i] == '`' && outgoing[i+1] == '`' && outgoing[i+2] == '`') {
+      code_count++;
+    }
+  }
+
+  // If we have code blocks (even pairs of ```), send them as files
+  if (code_count >= 2) {
+    int sent = extract_and_send_code_blocks(outgoing);
+
+    if (sent > 0) {
+      // Also send a summary message
+      String summary = "🦖 I've sent " + String(sent) + " code file(s)! Check above.";
+      send_streaming(summary);
+    } else {
+      // Code blocks found but extraction failed, send normally
+      send_streaming(outgoing);
+    }
+  } else if (looks_like_code(outgoing) && outgoing.length() > 100) {
+    // No ``` blocks but looks like code - detect language for proper extension
+    String detected = detect_language_from_content(outgoing);
+    String ext = "txt";
+    if (detected == "html" || detected == "html_full") ext = "html";
+    else if (detected == "css") ext = "css";
+    else if (detected == "js") ext = "js";
+    else if (detected == "py") ext = "py";
+    else if (detected == "c") ext = "c";
+    else if (detected == "cpp") ext = "cpp";
+    String filename = "code_" + String((unsigned long)millis()) + "." + ext;
+    transport_telegram_send_document(filename, outgoing, "text/plain", "Here's your code:");
+    send_streaming("🦖 I've sent the code as a file!");
+  } else {
+    // No code blocks, send with streaming
+    send_streaming(outgoing);
+  }
+
   record_chat_turn(incoming, outgoing);
   if (outgoing.startsWith("ERR:")) {
     status_led_notify_error();
@@ -186,6 +474,7 @@ void agent_loop_init() {
   status_led_init();
   scheduler_init();
   transport_telegram_init();
+  web_server_init();
   Serial.println("[agent] init complete");
 
   // Check for firmware updates after 30 seconds (gives WiFi time to stabilize)
