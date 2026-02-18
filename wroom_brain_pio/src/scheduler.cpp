@@ -7,6 +7,7 @@
 #include "brain_config.h"
 #include "event_log.h"
 #include "persona_store.h"
+#include "cron_store.h"
 
 static unsigned long s_next_status_ms = 0;
 static unsigned long s_next_heartbeat_ms = 0;
@@ -17,6 +18,10 @@ static long s_last_tz_offset_seconds = 0;
 static int s_last_reminder_yday = -1;
 static int s_last_reminder_target_minute = -1;
 static int s_last_reminder_reason = -1;
+
+// Cron job tracking
+static unsigned long s_next_cron_check_ms = 0;
+static int s_last_cron_minute = -1;
 
 static String to_lower_copy(String value) {
   value.toLowerCase();
@@ -214,6 +219,9 @@ void scheduler_init() {
 
   s_next_reminder_check_ms = millis() + 5000;
   Serial.println("[scheduler] daily reminder enabled");
+
+  s_next_cron_check_ms = millis() + 5000;
+  Serial.println("[scheduler] cron jobs enabled");
 }
 
 void scheduler_tick(incoming_cb_t dispatch_cb) {
@@ -297,6 +305,41 @@ void scheduler_tick(incoming_cb_t dispatch_cb) {
     s_last_reminder_yday = tm_now.tm_yday;
     s_last_reminder_target_minute = target_minute;
     s_last_reminder_reason = -1;
+  }
+
+  // Cron job checking
+  if ((long)(now - s_next_cron_check_ms) >= 0) {
+    s_next_cron_check_ms = now + 15000;
+
+    struct tm tm_now{};
+    if (!get_local_time_snapshot(tm_now)) {
+      // No time sync yet, skip cron check
+      return;
+    }
+
+    const int current_minute = tm_now.tm_hour * 60 + tm_now.tm_min;
+
+    // Only check once per minute to avoid duplicate triggers
+    if (current_minute != s_last_cron_minute) {
+      s_last_cron_minute = current_minute;
+
+      CronJob jobs[CRON_MAX_JOBS];
+      int job_count = cron_store_get_all(jobs, CRON_MAX_JOBS);
+
+      for (int i = 0; i < job_count; i++) {
+        const CronJob &job = jobs[i];
+
+        if (cron_should_trigger(job, tm_now.tm_hour, tm_now.tm_min,
+                               tm_now.tm_mday, tm_now.tm_mon + 1, tm_now.tm_wday)) {
+          String cmd = job.command;
+          cmd.trim();
+
+          event_log_append("SCHED: cron triggered: " + cmd);
+          dispatch_cb(cmd);
+          Serial.printf("[scheduler] Cron job triggered: %s\n", cmd.c_str());
+        }
+      }
+    }
   }
 }
 

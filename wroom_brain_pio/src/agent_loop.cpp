@@ -5,6 +5,7 @@
 #include <freertos/task.h>
 
 #include "brain_config.h"
+#include "cron_store.h"
 #include "scheduler.h"
 #include "chat_history.h"
 #include "memory_store.h"
@@ -20,6 +21,7 @@
 #include "usage_stats.h"
 #include "web_server.h"
 #include "react_agent.h"
+#include "skill_registry.h"
 
 // Store last LLM response for emailing code
 static String s_last_llm_response = "";
@@ -560,6 +562,7 @@ void agent_loop_init() {
   chat_history_init();
   memory_init();
   file_memory_init();  // Initialize SPIFFS-based file memory
+  skill_init();        // Initialize lazy-loading skills
   model_config_init();
   persona_init();
 #if ENABLE_TASKS
@@ -567,6 +570,7 @@ void agent_loop_init() {
 #endif
   tool_registry_init();
   react_agent_init();  // Initialize ReAct agent with tool registry
+  cron_store_init();   // Initialize cron store (loads cron.md)
   usage_init();
   status_led_init();
   scheduler_init();

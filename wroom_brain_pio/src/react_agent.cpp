@@ -6,6 +6,7 @@
 #include "file_memory.h"
 #include "event_log.h"
 #include "chat_history.h"
+#include "skill_registry.h"
 
 namespace {
 
@@ -38,6 +39,10 @@ static const ReactTool s_react_tools[] = {
     {"reminder_show", "Show all active reminders", "none", "reminder_show"},
     {"reminder_clear", "Clear all reminders", "none", "reminder_clear"},
     {"reminder_run", "Manually trigger a reminder check", "none", "reminder_run"},
+    {"cron_add", "Add a cron job (minute hour day month weekday | command)", "<cron_expr> | <cmd>", "cron_add: 0 9 * * * | Good morning"},
+    {"cron_list", "List all cron jobs", "none", "cron_list"},
+    {"cron_show", "Show cron.md file content", "none", "cron_show"},
+    {"cron_clear", "Clear all cron jobs", "none", "cron_clear"},
 
     // Time & Timezone
     {"time_show", "Show current time and timezone", "none", "time_show"},
@@ -107,6 +112,10 @@ static const ReactTool s_react_tools[] = {
     {"cancel", "Cancel any pending confirmation", "none", "cancel"},
     {"confirm", "Confirm a pending action", "none", "confirm"},
     {"yes", "Confirm a pending action", "none", "yes"},
+
+    // Skills
+    {"use_skill", "Activate a skill by name (lazy-loaded from SPIFFS)", "<skill_name> [extra context]", "use_skill frontend_dev build a portfolio site"},
+    {"skill_list", "List all available agent skills", "none", "skill_list"},
 };
 // clang-format on
 
@@ -151,7 +160,7 @@ struct ReactStep {
 // Build the tools section of the system prompt
 String build_tools_prompt() {
   String tools_text;
-  tools_text.reserve(2000);
+  tools_text.reserve(2500);
 
   for (size_t i = 0; i < s_num_tools; i++) {
     const ReactTool &tool = s_react_tools[i];
@@ -159,6 +168,13 @@ String build_tools_prompt() {
     snprintf(buffer, sizeof(buffer), "\n%s: %s\n  Usage: %s\n  Example: %s",
              tool.name, tool.description, tool.parameters, tool.example);
     tools_text += buffer;
+  }
+
+  // Append dynamic skill descriptions (lazy-loaded names only)
+  String skill_descs = skill_get_descriptions_for_react();
+  if (skill_descs.length() > 0) {
+    tools_text += "\n\nAvailable Skills (use with use_skill):\n";
+    tools_text += skill_descs;
   }
 
   return tools_text;
@@ -345,6 +361,13 @@ bool react_agent_should_use(const String &query) {
   String lc = query;
   lc.toLowerCase();
 
+  // Check if query matches a skill (explicit or keyword-based)
+  String matched_skill = skill_match(lc);
+  if (matched_skill.length() > 0) {
+    Serial.println("[ReAct] Skill matched: " + matched_skill);
+    return true;
+  }
+
   // Keywords that suggest multi-step reasoning OR web generation
   const char *complex_keywords[] = {
       "how do i", "help me", "what should", "can you", "i need to",
@@ -353,7 +376,9 @@ bool react_agent_should_use(const String &query) {
       "plan", "organize", "track",
       // Web generation triggers
       "make a", "create a", "generate a", "build a", "website", "html",
-      "saas", "landing page", "portfolio", "app", "web app"
+      "saas", "landing page", "portfolio", "app", "web app",
+      // Skill triggers
+      "use skill", "use_skill", "skill"
   };
 
   for (size_t i = 0; i < sizeof(complex_keywords) / sizeof(complex_keywords[0]); i++) {

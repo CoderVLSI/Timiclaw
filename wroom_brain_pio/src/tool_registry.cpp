@@ -9,6 +9,7 @@
 #include "agent_loop.h"
 #include "brain_config.h"
 #include "chat_history.h"
+#include "cron_store.h"
 #include "event_log.h"
 #include "llm_client.h"
 #include "memory_store.h"
@@ -22,6 +23,7 @@
 #include "web_server.h"
 #include "email_client.h"
 #include "usage_stats.h"
+#include "skill_registry.h"
 
 namespace {
 
@@ -186,6 +188,10 @@ void build_help_text(String &out) {
   out += "/reminder_set_daily <HH:MM> <msg> - Set reminder\n";
   out += "/reminder_show - Show reminders\n";
   out += "/reminder_clear - Clear reminders\n";
+  out += "/cron_add <expr> | <cmd> - Add cron job\n";
+  out += "/cron_list - List all cron jobs\n";
+  out += "/cron_show - Show cron.md content\n";
+  out += "/cron_clear - Clear all cron jobs\n";
 #if ENABLE_WEB_JOBS
   out += "/web_files_make [topic] - Generate web files\n";
 #endif
@@ -211,6 +217,11 @@ void build_help_text(String &out) {
   out += "/model set <provider> <key> - Set API key\n";
   out += "/model select <provider> <model> - Set model name\n";
   out += "/model clear <provider> - Clear API key\n";
+  out += "/skills - List all agent skills\n";
+  out += "/skill_show <name> - Show skill details\n";
+  out += "/skill_add <name> <desc>: <instructions> - Add skill\n";
+  out += "/skill_remove <name> - Remove skill\n";
+  out += "/use_skill <name> [request] - Execute a skill\n";
   out += "\n💬 Just chat with me normally too! I'll use tools when needed.";
 }
 
@@ -245,7 +256,7 @@ void tool_registry_init() {
 #if ENABLE_PLAN
       "plan <task>, "
 #endif
-      "reminder_set_daily/reminder_show/reminder_clear, timezone_show/timezone_set/timezone_clear, "
+      "reminder_set_daily/reminder_show/reminder_clear, cron_add/cron_list/cron_show/cron_clear, timezone_show/timezone_set/timezone_clear, "
 #if ENABLE_WEB_JOBS
       "webjob_set_daily/webjob_show/webjob_run/webjob_clear, "
       "web_files_make, "
@@ -2196,6 +2207,65 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+  // Cron commands
+  if (cmd_lc == "cron_add" || cmd_lc.startsWith("cron_add ")) {
+    String tail = cmd.length() > 8 ? cmd.substring(8) : "";
+    tail.trim();
+
+    if (tail.length() == 0) {
+      out = "ERR: usage: cron_add <minute> <hour> <day> <month> <weekday> | <command>\n"
+            "Example: cron_add 0 9 * * * | Good morning\n"
+            "Fields: minute(0-59) hour(0-23) day(1-31) month(1-12) weekday(0-6, Sun=0)\n"
+            "Use * for wildcard";
+      return true;
+    }
+
+    String err;
+    if (!cron_store_add(tail, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+
+    int count = cron_store_count();
+    out = "OK: cron job added\nTotal jobs: " + String(count);
+    return true;
+  }
+
+  if (cmd_lc == "cron_list" || cmd_lc == "cron_show") {
+    CronJob jobs[CRON_MAX_JOBS];
+    int count = cron_store_get_all(jobs, CRON_MAX_JOBS);
+
+    if (count == 0) {
+      out = "No cron jobs configured";
+      return true;
+    }
+
+    out = "Cron Jobs (" + String(count) + "):\n";
+    for (int i = 0; i < count; i++) {
+      out += String(i + 1) + ". " + cron_job_to_string(jobs[i]) + "\n";
+    }
+
+    if (cmd_lc == "cron_show") {
+      String content;
+      String err;
+      if (cron_store_get_content(content, err)) {
+        out += "\n--- cron.md ---\n" + content;
+      }
+    }
+
+    return true;
+  }
+
+  if (cmd_lc == "cron_clear") {
+    String err;
+    if (!cron_store_clear(err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = "OK: all cron jobs cleared";
+    return true;
+  }
+
 #if ENABLE_WEB_JOBS
   if (cmd_lc == "webjob_clear") {
     String hhmm;
@@ -3042,6 +3112,142 @@ bool tool_registry_execute(const String &input, String &out) {
       return true;
     }
     out = "📝 OK: Added to today's notes";
+    return true;
+  }
+
+  // Skill commands (lazy-loaded from SPIFFS)
+  if (cmd_lc == "skill_list" || cmd_lc == "skills" || cmd_lc == "skill list") {
+    String list, err;
+    if (!skill_list(list, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = list;
+    return true;
+  }
+
+  if (cmd_lc.startsWith("skill_show ") || cmd_lc.startsWith("skill show ")) {
+    String name = cmd.substring(cmd.indexOf(' ', cmd.indexOf(' ') + 1) + 1);
+    if (cmd_lc.startsWith("skill_show ")) {
+      name = cmd.substring(11);
+    }
+    name.trim();
+    name.toLowerCase();
+    if (name.length() == 0) {
+      out = "ERR: usage skill_show <name>";
+      return true;
+    }
+    String content, err;
+    if (!skill_show(name, content, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    if (content.length() > 1400) {
+      content = content.substring(0, 1400) + "...(truncated)";
+    }
+    out = "🧩 Skill: " + name + "\n\n" + content;
+    return true;
+  }
+
+  if (cmd_lc.startsWith("skill_add ") || cmd_lc.startsWith("skill add ")) {
+    // Format: skill_add <name> <description>: <instructions>
+    String rest = cmd.substring(cmd.indexOf(' ') + 1);
+    if (cmd_lc.startsWith("skill_add ")) {
+      rest = cmd.substring(10);
+    } else {
+      rest = cmd.substring(10);
+    }
+    rest.trim();
+
+    // Parse name
+    int space = rest.indexOf(' ');
+    if (space < 0) {
+      out = "ERR: usage skill_add <name> <description>: <instructions>";
+      return true;
+    }
+    String name = rest.substring(0, space);
+    String remainder = rest.substring(space + 1);
+    remainder.trim();
+
+    // Split description and instructions at ':'
+    int colon = remainder.indexOf(':');
+    String description, instructions;
+    if (colon > 0) {
+      description = remainder.substring(0, colon);
+      instructions = remainder.substring(colon + 1);
+    } else {
+      description = remainder;
+      instructions = remainder;
+    }
+    description.trim();
+    instructions.trim();
+
+    String err;
+    if (!skill_add(name, description, instructions, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = "🧩 Skill '" + name + "' created!";
+    return true;
+  }
+
+  if (cmd_lc.startsWith("skill_remove ") || cmd_lc.startsWith("skill remove ") ||
+      cmd_lc.startsWith("skill_delete ") || cmd_lc.startsWith("skill delete ")) {
+    String name = cmd.substring(cmd.lastIndexOf(' ') + 1);
+    name.trim();
+    name.toLowerCase();
+    if (name.length() == 0) {
+      out = "ERR: usage skill_remove <name>";
+      return true;
+    }
+    String err;
+    if (!skill_remove(name, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = "🧩 Skill '" + name + "' removed.";
+    return true;
+  }
+
+  // use_skill command (explicit skill activation)
+  if (cmd_lc.startsWith("use_skill ") || cmd_lc.startsWith("use skill ")) {
+    String name = cmd.substring(cmd.indexOf(' ') + 1);
+    if (cmd_lc.startsWith("use_skill ")) {
+      name = cmd.substring(10);
+    } else {
+      name = cmd.substring(10);
+    }
+    // Might be "use_skill frontend_dev build a portfolio"
+    int space = name.indexOf(' ');
+    String extra_context = "";
+    if (space > 0) {
+      extra_context = name.substring(space + 1);
+      name = name.substring(0, space);
+    }
+    name.trim();
+    name.toLowerCase();
+
+    String content, err;
+    if (!skill_load(name, content, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+
+    // Build enhanced prompt with skill instructions
+    String prompt = "You are executing the '" + name + "' skill.\n\n"
+                    "=== SKILL INSTRUCTIONS ===\n" + content + "\n"
+                    "=== END SKILL ===\n\n";
+    if (extra_context.length() > 0) {
+      prompt += "User's specific request: " + extra_context + "\n\n";
+    }
+    prompt += "Follow the skill instructions precisely. Be thorough and detailed.";
+
+    String reply, llm_err;
+    if (llm_generate_reply(prompt, reply, llm_err)) {
+      out = "🧩 [" + name + "] " + reply;
+    } else {
+      out = "ERR: Skill execution failed: " + llm_err;
+    }
     return true;
   }
 

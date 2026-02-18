@@ -560,10 +560,18 @@ void transport_telegram_poll(incoming_cb_t cb) {
 
   s_last_chat_id = chat_id;
   s_last_update_id = update_id;
-  if (!has_text) {
-    return;
+
+  if (has_text) {
+    cb(text);
+  } else if (photo_file_id.length() > 0) {
+    // Auto-analyze: photo sent without caption
+    Serial.println("[tg] auto-analyze: photo without caption");
+    cb("describe this photo");
+  } else if (doc_file_id.length() > 0) {
+    // Auto-analyze: document sent without caption
+    Serial.println("[tg] auto-analyze: document without caption");
+    cb("summarize this document");
   }
-  cb(text);
 }
 
 namespace {
