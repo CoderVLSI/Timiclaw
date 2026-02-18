@@ -1,8 +1,8 @@
 #include "agent_loop.h"
 
 #include <Arduino.h>
-#include <vector>
-#include <freertos/semphr.h>
+#include <freertos/queue.h>
+#include <freertos/task.h>
 
 #include "brain_config.h"
 #include "scheduler.h"
@@ -24,9 +24,33 @@
 // Store last LLM response for emailing code
 static String s_last_llm_response = "";
 
-// Web Message Queue
-static std::vector<String> s_web_message_queue;
-static SemaphoreHandle_t s_web_queue_mutex = NULL;
+// Agent Task Logic
+struct AgentTaskMsg {
+  char *msg_ptr;
+  bool from_telegram;
+};
+static QueueHandle_t s_agent_queue = NULL;
+
+static void send_reply_via_telegram(const String &outgoing);
+
+static void agent_task_code(void *param) {
+  AgentTaskMsg item;
+  while (true) {
+    if (xQueueReceive(s_agent_queue, &item, portMAX_DELAY)) {
+      if (item.msg_ptr) {
+        String msg = String(item.msg_ptr);
+        free(item.msg_ptr); // Free heap copy
+        
+        // Process message (blocking is fine in this task)
+        String reply = agent_loop_process_message(msg);
+        
+        if (item.from_telegram && reply.length() > 0) {
+           send_reply_via_telegram(reply);
+        }
+      }
+    }
+  }
+}
 
 String agent_loop_get_last_response() {
   return s_last_llm_response;
@@ -470,32 +494,50 @@ String agent_loop_process_message(const String &msg) {
 }
 
 static void on_incoming_message(const String &msg) {
-  record_user_msg(msg);
-  String reply = agent_loop_process_message(msg);
-  if (reply.length() > 0) {
-    // Send to Telegram (do NOT record again)
-    send_reply_via_telegram(reply);
-  }
+  // Queue for processing (Telegram source = true)
+  agent_loop_queue_message(msg, true);
 }
 
-void agent_loop_queue_message(const String &msg) {
+void agent_loop_queue_message(const String &msg, bool from_telegram) {
   if (msg.length() == 0) return;
   
   // Record User Msg immediately so UI sees it
+  // (Telegram polls already call record_user_msg via on_incoming_message? or poll?)
+  // Wait, on_incoming_message is called by poll.
+  // We should call record_user_msg here if not done?
+  // But caller might have done it.
+  // Actually on_incoming_message calls queue.
+  // Web calls queue.
+  // So queue should record?
+  
+  // Let's assume queue does recording to accept all callers.
+  // Duplicate recording for Telegram if poll did it?
+  // poll calls on_incoming_message.
+  // on_incoming_message calls queue.
+  // If poll ALSO records, dup.
+  // But poll (transport_telegram_poll) usually just callbacks. It doesn't record.
+  // So WE record here.
+
   record_user_msg(msg);
 
-  if (!s_web_queue_mutex) return;
+  if (!s_agent_queue) return;
 
-  if (xSemaphoreTake(s_web_queue_mutex, pdMS_TO_TICKS(100))) {
-    s_web_message_queue.push_back(msg);
-    xSemaphoreGive(s_web_queue_mutex);
-  } else {
-    Serial.println("[agent] failed to queue message (mutex timeout)");
+  char *copy = strdup(msg.c_str());
+  if (copy) {
+    AgentTaskMsg item;
+    item.msg_ptr = copy;
+    item.from_telegram = from_telegram;
+    if (xQueueSend(s_agent_queue, &item, pdMS_TO_TICKS(100)) != pdTRUE) {
+      free(copy);
+      Serial.println("[agent] queue full");
+    }
   }
 }
 
 void agent_loop_init() {
-  s_web_queue_mutex = xSemaphoreCreateMutex();
+  s_agent_queue = xQueueCreate(10, sizeof(AgentTaskMsg));
+  xTaskCreate(agent_task_code, "AgentTask", 16384, NULL, 1, NULL); 
+  
   event_log_init();
   chat_history_init();
   memory_init();
@@ -527,19 +569,6 @@ void agent_loop_tick() {
   status_led_tick();
   transport_telegram_poll(on_incoming_message);
   scheduler_tick(on_incoming_message);
-
-  // Process Web Queue
-  String pending_msg = "";
-  if (s_web_queue_mutex && xSemaphoreTake(s_web_queue_mutex, 0)) {
-    if (!s_web_message_queue.empty()) {
-      pending_msg = s_web_message_queue.front();
-      s_web_message_queue.erase(s_web_message_queue.begin());
-    }
-    xSemaphoreGive(s_web_queue_mutex);
-  }
-
-  if (pending_msg.length() > 0) {
-    // Process message (blocking is fine in main loop)
-    agent_loop_process_message(pending_msg);
-  }
+  
+  // Web/Agent processing is now in AgentTask
 }
