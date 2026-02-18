@@ -1200,37 +1200,79 @@ bool llm_understand_media(const String &instruction, const String &mime_type,
     // Build data URI: data:<mime>;base64,<data>
     const String data_uri = "data:" + media_mime + ";base64," + base64_data;
 
-    // OpenAI vision format with image_url
-    const String body =
-        String("{\"model\":\"") + json_escape(vision_model) +
-        "\",\"messages\":[{\"role\":\"user\",\"content\":[" +
-        "{\"type\":\"text\",\"text\":\"" + json_escape(prompt) + "\"}," +
-        "{\"type\":\"image_url\",\"image_url\":{\"url\":\"" + data_uri + "\"}}" +
-        "]}],\"temperature\":0.2,\"max_tokens\":1024}";
+    // Retry loop: Try requested model, then fallback if it fails
+    for (int attempt = 0; attempt < 2; attempt++) {
+      // OpenAI vision format with image_url
+      const String body =
+          String("{\"model\":\"") + json_escape(vision_model) +
+          "\",\"messages\":[{\"role\":\"user\",\"content\":[" +
+          "{\"type\":\"text\",\"text\":\"" + json_escape(prompt) + "\"}," +
+          "{\"type\":\"image_url\",\"image_url\":{\"url\":\"" + data_uri + "\"}}" +
+          "]}],\"temperature\":0.2,\"max_tokens\":1024}";
 
-    const HttpResult res =
-        http_post_json(url, body, "Authorization", "Bearer " + api_key);
-    if (res.status_code < 200 || res.status_code >= 300) {
-      error_out = summarize_http_error("Vision", res);
+      const HttpResult res =
+          http_post_json(url, body, "Authorization", "Bearer " + api_key);
+
+      if (res.status_code >= 200 && res.status_code < 300) {
+        if (parse_response_text(res.body, reply_out)) {
+          reply_out.trim();
+          if (reply_out.length() > 0) {
+            usage_record_call("media", 200, provider.c_str(), vision_model.c_str());
+            return true;
+          }
+        }
+      }
+
+      // Handle failure
       usage_record_call("media", res.status_code, provider.c_str(), vision_model.c_str());
+      
+      // Only retry if on OpenRouter (can switch to other models)
+      if (attempt == 0 && (provider == "openrouter" || provider == "openrouter.ai")) {
+        Serial.printf("[llm] Vision model %s failed (HTTP %d), trying fallback...\n", vision_model.c_str(), res.status_code);
+        
+        // Priority 1: Fallback to Gemini provider if configured (user preference)
+        String gemini_key = model_config_get_api_key("gemini");
+        if (gemini_key.length() > 0) {
+            String gemini_model = model_config_get_model("gemini");
+            if (gemini_model.length() == 0) gemini_model = "gemini-1.5-flash"; // Default to 1.5-flash
+
+            Serial.printf("[llm] Switching to Gemini provider: %s\n", gemini_model.c_str());
+            
+            // Execute Gemini logic inline
+            String gemini_base = String(LLM_GEMINI_BASE_URL);
+            String g_url = join_url(gemini_base, String("/v1beta/models/") + gemini_model + ":generateContent");
+            String g_body = String("{\"contents\":[{\"parts\":[{\"text\":\"") + json_escape(prompt) +
+                            "\"},{\"inlineData\":{\"mimeType\":\"" + json_escape(media_mime) +
+                            "\",\"data\":\"" + base64_data +
+                            "\"}}]}],\"generationConfig\":{\"temperature\":0.2}}";
+
+            HttpResult g_res = http_post_json(g_url, g_body, "x-goog-api-key", gemini_key);
+            if (g_res.status_code >= 200 && g_res.status_code < 300) {
+               if (parse_response_text(g_res.body, reply_out)) {
+                   reply_out.trim();
+                   if (reply_out.length() > 0) {
+                       usage_record_call("media", 200, "gemini", gemini_model.c_str());
+                       return true;
+                   }
+               }
+            }
+            // If Gemini provider failed, continue to other fallback? 
+            // Or stop? Let's stop if explicit provider fallback failed to avoid confusion.
+            error_out = summarize_http_error("Gemini fallback", g_res);
+            return false;
+        }
+
+        // Priority 2: Fallback to OpenRouter free Gemini
+        vision_model = "google/gemini-2.0-flash-lite-preview-02-05:free";
+        continue;
+      }
+      
+      // Final failure
+      error_out = summarize_http_error("Vision", res);
       return false;
     }
-
-    if (!parse_response_text(res.body, reply_out)) {
-      error_out = "Could not parse vision response";
-      usage_record_call("media", 500, provider.c_str(), vision_model.c_str());
-      return false;
-    }
-
-    reply_out.trim();
-    if (reply_out.length() == 0) {
-      error_out = "Empty vision response";
-      usage_record_call("media", 500, provider.c_str(), vision_model.c_str());
-      return false;
-    }
-
-    usage_record_call("media", 200, provider.c_str(), vision_model.c_str());
-    return true;
+    
+    return false;
   }
 
   error_out = "Vision not supported for provider: " + provider + ". Use openrouter, openai, or gemini.";
