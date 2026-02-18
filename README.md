@@ -60,6 +60,16 @@ flowchart TD
 - Event logs
 - Image generation command (`generate_image <prompt>`)
 - Web file generator command (`web_files_make [topic]`) with file delivery via Telegram
+- **Web Dashboard**:
+  - Accessible at `http://<ESP32-IP>/`.
+  - Chat interface with history.
+  - Configuration management (API Keys, Models).
+  - Real-time system status (Heap, WiFi, Uptime).
+- **Web Search**:
+  - `search <query>` (Tavily/DDG).
+- **Time/Reminders**:
+  - `time` (Get current time).
+  - `reminder_set_daily` (Persisted schedule).
 
 ## Supported Commands (Current)
 
@@ -81,6 +91,7 @@ Actuation and safety:
 LLM and content:
 - `plan <task>`
 - `generate_image <prompt>`
+- `search <query>`
 
 Memory/persona:
 - `remember <note>`
@@ -94,6 +105,7 @@ Memory/persona:
 - `heartbeat_clear`
 
 Time, reminders, jobs:
+- `time`
 - `time_show`
 - `timezone_show`
 - `timezone_set <Zone>`
@@ -157,22 +169,12 @@ copy .env.example .env
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_ALLOWED_CHAT_ID`
 
-4. Build:
+4. Build and flash Firmware AND Filesystem (for Dashboard):
 
 ```powershell
-python -m platformio run
-```
-
-5. Flash:
-
-```powershell
-python -m platformio run -t upload --upload-port COMx
-```
-
-6. Monitor:
-
-```powershell
-python -m platformio device monitor -b 115200 -p COMx
+python -m platformio run -t upload
+python -m platformio run -t uploadfs
+python -m platformio device monitor -b 115200
 ```
 
 ## Get Telegram Allowed Chat ID
