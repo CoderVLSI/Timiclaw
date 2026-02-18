@@ -352,12 +352,14 @@
 
         // Chat Logic
         const chatHistory = document.getElementById('chat-history');
+        let isSending = false;
 
         function scrollToBottom() {
             chatHistory.scrollTop = chatHistory.scrollHeight;
         }
 
         async function loadChatHistory() {
+            if (isSending) return;
             try {
                 const res = await fetch('/api/chat');
                 const data = await res.json();
@@ -408,10 +410,14 @@
             const text = input.value.trim();
             if (!text) return;
 
+            // Optimistic append
             appendMessage('user', text);
-            input.value = '';
             scrollToBottom();
 
+            // Optimistic clear
+            input.value = '';
+
+            isSending = true;
             try {
                 const res = await fetch('/api/chat', {
                     method: 'POST',
@@ -419,12 +425,15 @@
                     body: JSON.stringify({ message: text })
                 });
                 const data = await res.json();
-                if (data.reply) {
-                    appendMessage('bot', data.reply);
-                }
-                scrollToBottom();
+
+                // Backend queued it. History has it.
+                // Trigger immediate reload to show it.
             } catch (e) {
+                console.error(e);
                 appendMessage('bot', 'Error: ' + e.message);
+            } finally {
+                isSending = false;
+                loadChatHistory(); // Load the new message immediately
             }
         }
 
