@@ -14,6 +14,7 @@
 #include "model_config.h"
 #include "persona_store.h"
 #include "usage_stats.h"
+#include <time.h>
 
 namespace {
 
@@ -45,6 +46,41 @@ struct HttpResult {
   String body;
   String error;
 };
+
+// Build a compact time-awareness context for the LLM
+String build_time_context() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    return "";  // NTP not synced yet
+  }
+
+  // Day of week
+  const char* days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+  const char* day_name = days[timeinfo.tm_wday];
+
+  // Time of day period
+  const char* period;
+  int hour = timeinfo.tm_hour;
+  if (hour >= 5 && hour < 12) {
+    period = "morning";
+  } else if (hour >= 12 && hour < 17) {
+    period = "afternoon";
+  } else if (hour >= 17 && hour < 21) {
+    period = "evening";
+  } else {
+    period = "night";
+  }
+
+  // Format: "It is Wednesday afternoon, 14:32 (Feb 19, 2026)"
+  char buf[80];
+  strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
+  String time_str = String(buf);
+  strftime(buf, sizeof(buf), "%b %d, %Y", &timeinfo);
+  String date_str = String(buf);
+
+  return "It is " + String(day_name) + " " + String(period) + ", " +
+         time_str + " (" + date_str + ")";
+}
 
 String to_lower(String value) {
   value.toLowerCase();
@@ -759,6 +795,14 @@ bool llm_generate_plan(const String &task, String &plan_out, String &error_out) 
 
 bool llm_generate_reply(const String &message, String &reply_out, String &error_out) {
   String system_prompt = String(kChatSystemPrompt);
+
+  // Inject current time awareness
+  String time_ctx = build_time_context();
+  if (time_ctx.length() > 0) {
+    system_prompt += "\n\nCURRENT TIME: " + time_ctx +
+                     "\nUse this to greet appropriately (good morning/afternoon/evening) "
+                     "and be aware of timing context in conversations.";
+  }
 
   // Include SOUL from file_memory if available
   String soul_text;

@@ -8,6 +8,8 @@
 #include "chat_history.h"
 #include "skill_registry.h"
 
+#include <time.h>
+
 namespace {
 
 // ============================================================================
@@ -34,11 +36,7 @@ static const ReactTool s_react_tools[] = {
     {"task_clear", "Clear all completed tasks", "none", "task_clear"},
 #endif
 
-    // Reminders & Scheduling
-    {"reminder_set_daily", "Set a daily reminder at specific time", "<HH:MM> <message>", "reminder_set_daily: 09:00 Take morning medicine"},
-    {"reminder_show", "Show all active reminders", "none", "reminder_show"},
-    {"reminder_clear", "Clear all reminders", "none", "reminder_clear"},
-    {"reminder_run", "Manually trigger a reminder check", "none", "reminder_run"},
+    // Reminders & Scheduling (use cron_add for all scheduling)
     {"cron_add", "Add a cron job (minute hour day month weekday | command)", "<cron_expr> | <cmd>", "cron_add: 0 9 * * * | Good morning"},
     {"cron_list", "List all cron jobs", "none", "cron_list"},
     {"cron_show", "Show cron.md file content", "none", "cron_show"},
@@ -127,20 +125,49 @@ static const size_t s_num_tools = sizeof(s_react_tools) / sizeof(s_react_tools[0
 
 // Build the ReAct system prompt dynamically (needs iteration count)
 String build_react_system_prompt() {
-  return "🦖 You are Timi, a clever dinosaur assistant on an ESP32. Think step-by-step!\n\n"
-         "Format for each step:\n"
-         "🤔 THINK: <what you're analyzing>\n"
-         "⚡ DO: <tool_name> <parameters>\n"
-         "When done, give final answer:\n"
-         "✅ ANSWER: <response to user>\n\n"
-         "Guidelines:\n"
-         "- Always THINK first, then DO one action\n"
-         "- Read tool results, THINK again, continue\n"
-         "- Use ANSWER when task is complete\n"
-         "- Be brief and helpful\n"
-         "- For SCHEDULING: Prefer cron_add over reminder_set_daily (cron.md supports multiple jobs)\n"
-         "- Max " + String(REACT_MAX_ITERATIONS) + " thinking cycles\n\n"
-         "Your tools:";
+  String prompt = "🦖 You are Timi, a clever dinosaur assistant on an ESP32. Think step-by-step!\n\n";
+
+  // Inject current time awareness
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo)) {
+    const char* days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+    const char* period;
+    int hour = timeinfo.tm_hour;
+    if (hour >= 5 && hour < 12) period = "morning";
+    else if (hour >= 12 && hour < 17) period = "afternoon";
+    else if (hour >= 17 && hour < 21) period = "evening";
+    else period = "night";
+
+    char buf[80];
+    strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
+    String time_str = String(buf);
+    strftime(buf, sizeof(buf), "%b %d, %Y", &timeinfo);
+    String date_str = String(buf);
+
+    prompt += "CURRENT TIME: It is " + String(days[timeinfo.tm_wday]) + " " +
+              String(period) + ", " + time_str + " (" + date_str + ")\n";
+    prompt += "Greet appropriately and be time-aware.\n\n";
+  }
+
+  prompt += "Format for each step:\n"
+            "🤔 THINK: <what you're analyzing>\n"
+            "⚡ DO: <tool_name> <parameters>\n"
+            "When done, give final answer:\n"
+            "✅ ANSWER: <response to user>\n\n"
+            "Guidelines:\n"
+            "- Always THINK first, then DO one action\n"
+            "- Read tool results, THINK again, continue\n"
+            "- Use ANSWER when task is complete\n"
+            "- Be brief and helpful\n"
+            "- For SCHEDULING: Use cron_add with format: <min> <hr> <day> <mo> <wkday> | <command>\n"
+            "  Natural language examples → cron_add:\n"
+            "    'remind me at 9am daily' → cron_add 0 9 * * * | <message>\n"
+            "    'wake me at 6am' → cron_add 0 6 * * * | <message>\n"
+            "    'every monday at 9:30am' → cron_add 30 9 * * 1 | <message>\n"
+            "  Wildcard * means 'any', weekday: 0=Sun, 1=Mon, ..., 6=Sat\n"
+            "- Max " + String(REACT_MAX_ITERATIONS) + " thinking cycles\n\n"
+            "Your tools:";
+  return prompt;
 }
 
 // ============================================================================
