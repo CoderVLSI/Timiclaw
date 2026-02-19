@@ -970,6 +970,7 @@ bool llm_extract_user_facts(const String &user_message, const String &existing_p
   static const char *kExtractPrompt =
       "Extract ONLY new personal facts from the user's message. "
       "Facts include: name, location, age, job, interests, preferences, schedule, family, pets. "
+      "Ignore questions, commands, or temporary context. "
       "If the user's existing profile already contains the fact, skip it. "
       "Return ONLY the new facts as bullet points (- fact). "
       "If no new facts found, return exactly: NONE";

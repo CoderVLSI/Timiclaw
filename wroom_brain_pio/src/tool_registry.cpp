@@ -2654,6 +2654,21 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+  if (cmd_lc == "profile" || cmd_lc == "whoami" || cmd_lc == "memory_user") {
+    String user_profile, user_err;
+    if (!file_memory_read_user(user_profile, user_err)) {
+      out = "ERR: " + user_err;
+      return true;
+    }
+    user_profile.trim();
+    if (user_profile.length() == 0) {
+      out = "🦖 I don't know much about you yet! Tell me your name or interests.";
+    } else {
+      out = "👤 **User Profile (what I know about you):**\n" + user_profile;
+    }
+    return true;
+  }
+
   if (cmd_lc == "cancel") {
     if (!s_pending.active) {
       if (s_pending_reminder_tz.active || s_pending_reminder_details.active) {

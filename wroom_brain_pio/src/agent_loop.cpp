@@ -434,6 +434,9 @@ String agent_loop_process_message(const String &msg) {
   Serial.println(msg);
   event_log_append("IN: " + msg);
 
+  // Record user message in history (was missing!)
+  record_user_msg(msg);
+
   String response;
   bool handled = false;
 
@@ -510,10 +513,19 @@ String agent_loop_process_message(const String &msg) {
   // Record history (Bot only, User recorded at ingress)
   record_bot_msg(response);
 
-  // Auto-learn: extract personal facts every 5th message
+  // Auto-learn: extract personal facts every 5th message OR if keywords found
   static int s_msg_counter = 0;
   s_msg_counter++;
-  if (s_msg_counter % 5 == 0 && msg.length() > 10) {
+  
+  String msg_lc = msg;
+  msg_lc.toLowerCase();
+  bool force_learn = (msg_lc.indexOf("remember") >= 0 || 
+                      msg_lc.indexOf("favorit") >= 0 || 
+                      msg_lc.indexOf("name is") >= 0 ||
+                      msg_lc.indexOf("i am ") >= 0 ||
+                      msg_lc.indexOf("my ") >= 0); // "my car", "my mom", etc.
+
+  if ((s_msg_counter % 5 == 0 || force_learn) && msg.length() > 5) {
     String existing_user, user_err;
     file_memory_read_user(existing_user, user_err);
 
@@ -524,6 +536,9 @@ String agent_loop_process_message(const String &msg) {
         if (file_memory_append_user(facts, append_err)) {
           Serial.println("[auto-learn] Learned: " + facts);
           event_log_append("AUTO_LEARN: " + facts);
+          
+          // Visual confirmation for user
+          response += "\n\n(📝 Learned: " + facts + ")";
         }
       }
     }
