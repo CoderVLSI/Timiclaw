@@ -14,6 +14,7 @@ static incoming_cb_t s_dispatch_cb = nullptr;
 
 static unsigned long s_next_status_ms = 0;
 static unsigned long s_next_heartbeat_ms = 0;
+static unsigned long s_next_proactive_ms = 0;
 static bool s_time_configured = false;
 static String s_last_tz = "";
 static long s_last_tz_offset_seconds = 0;
@@ -247,6 +248,13 @@ void scheduler_init() {
     Serial.println("[scheduler] heartbeat enabled");
   }
 
+  if (!PROACTIVE_ENABLED) {
+    Serial.println("[scheduler] proactive agent disabled");
+  } else {
+    s_next_proactive_ms = millis() + PROACTIVE_INTERVAL_MS;
+    Serial.println("[scheduler] proactive agent enabled (every " + String(PROACTIVE_INTERVAL_MS / 60000) + "m)");
+  }
+
   s_next_cron_check_ms = millis() + 5000;
   Serial.println("[scheduler] cron jobs enabled");
 }
@@ -275,6 +283,13 @@ void scheduler_tick(incoming_cb_t dispatch_cb) {
       }
     }
     s_next_heartbeat_ms = now + HEARTBEAT_INTERVAL_MS;
+  }
+
+  // Proactive agent check
+  if (PROACTIVE_ENABLED && (long)(now - s_next_proactive_ms) >= 0) {
+    event_log_append("SCHED: proactive_check");
+    dispatch_cb(String("proactive_check"));
+    s_next_proactive_ms = now + PROACTIVE_INTERVAL_MS;
   }
 
   // Cron job checking

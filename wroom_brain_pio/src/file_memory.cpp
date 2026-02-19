@@ -346,6 +346,36 @@ bool file_memory_read_user(String &user_out, String &error_out) {
   return true;
 }
 
+bool file_memory_append_user(const String &text, String &error_out) {
+  if (!g_backend_ready) {
+    error_out = "Filesystem not ready";
+    return false;
+  }
+
+  // Check current size
+  if (fs_exists(kUserPath)) {
+    fs::File check = fs_open(kUserPath, FILE_READ);
+    if (check) {
+      size_t current = check.size();
+      check.close();
+      if (current + text.length() > 4096) {
+        error_out = "USER.md full (4KB limit)";
+        return false;
+      }
+    }
+  }
+
+  fs::File f = fs_open(kUserPath, FILE_APPEND);
+  if (!f) {
+    error_out = "Failed to open USER.md for append";
+    return false;
+  }
+
+  f.print("\n" + text);
+  f.close();
+  return true;
+}
+
 bool file_memory_append_daily(const String &note, String &error_out) {
   if (!g_backend_ready) {
     error_out = "Filesystem not ready";
@@ -638,8 +668,36 @@ bool file_memory_read_file(const String &filename, String &content_out, String &
     return false;
   }
 
-  content_out = f.readString();
+  size_t file_size = f.size();
+  Serial.printf("[file_memory] Reading %s: %d bytes\n", path.c_str(), file_size);
+
+  // Reserve space and read in chunks for better reliability
+  content_out = "";
+  if (file_size > 0) {
+    content_out.reserve(file_size + 1);
+
+    // Read file in chunks to avoid memory issues
+    const size_t chunk_size = 512;
+    char buffer[chunk_size];
+    while (f.available() > 0) {
+      size_t bytes_to_read = min((size_t)f.available(), chunk_size);
+      size_t bytes_read = f.read((uint8_t*)buffer, bytes_to_read);
+      if (bytes_read > 0) {
+        content_out += String(buffer, bytes_read);
+      } else {
+        break;
+      }
+    }
+  }
+
   f.close();
+
+  Serial.printf("[file_memory] Read %d bytes, content length: %d\n", file_size, content_out.length());
+
+  if (content_out.length() == 0 && file_size > 0) {
+    error_out = "Failed to read file content (read 0 bytes from " + String(file_size) + ")";
+    return false;
+  }
 
   return true;
 }

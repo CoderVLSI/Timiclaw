@@ -2586,6 +2586,74 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+  if (cmd_lc == "proactive_check") {
+    // Build context for proactive decision
+    String context = build_time_context();
+
+    // Add user profile
+    String user_profile, user_err;
+    if (file_memory_read_user(user_profile, user_err)) {
+      user_profile.trim();
+      if (user_profile.length() > 0) {
+        if (user_profile.length() > 400) {
+          user_profile = user_profile.substring(user_profile.length() - 400);
+        }
+        context += "\n\nUser profile:\n" + user_profile;
+      }
+    }
+
+    // Add pending tasks
+    String tasks, task_err;
+    if (task_list(tasks, task_err)) {
+      tasks.trim();
+      if (tasks.length() > 0) {
+        if (tasks.length() > 300) {
+          tasks = tasks.substring(0, 300) + "...";
+        }
+        context += "\n\nPending tasks:\n" + tasks;
+      }
+    }
+
+    // Add recent memory
+    String memory, mem_err;
+    if (file_memory_read_long_term(memory, mem_err)) {
+      memory.trim();
+      if (memory.length() > 0) {
+        if (memory.length() > 300) {
+          memory = memory.substring(memory.length() - 300);
+        }
+        context += "\n\nRecent memory:\n" + memory;
+      }
+    }
+
+    String reply, llm_err;
+    if (!llm_generate_proactive(context, reply, llm_err)) {
+      out = "ERR: " + llm_err;
+      return true;
+    }
+
+    if (reply.length() == 0) {
+      out = "🦖 (proactive: staying silent)";
+      return true;
+    }
+
+    if (reply.length() > 1400) {
+      reply = reply.substring(0, 1400) + "...";
+    }
+    out = reply;
+    return true;
+  }
+
+  if (cmd_lc == "proactive_on") {
+    out = "OK: proactive agent is enabled (runs every " + String(PROACTIVE_INTERVAL_MS / 60000) + " min)";
+    return true;
+  }
+
+  if (cmd_lc == "proactive_off") {
+    out = "OK: proactive agent disabled. Use /proactive_on to re-enable.";
+    return true;
+  }
+
   if (cmd_lc == "cancel") {
     if (!s_pending.active) {
       if (s_pending_reminder_tz.active || s_pending_reminder_details.active) {
@@ -3156,10 +3224,26 @@ bool tool_registry_execute(const String &input, String &out) {
       return true;
     }
 
+    Serial.printf("[files_email] File %s read, %d bytes\n", filename.c_str(), content.length());
+
     String subject = "File from ESP32 Bot: " + filename;
     String email_err;
-    if (email_send(to_email, subject, "", content, email_err)) {
-      out = "Emailed " + filename + " to " + to_email;
+
+    // Detect HTML files and send as html_content
+    String filename_lower = filename;
+    filename_lower.toLowerCase();
+    bool is_html = filename_lower.endsWith(".html") || filename_lower.endsWith(".htm");
+
+    bool sent;
+    if (is_html) {
+      Serial.printf("[files_email] Sending as HTML content\n");
+      sent = email_send(to_email, subject, content, "", email_err);
+    } else {
+      sent = email_send(to_email, subject, "", content, email_err);
+    }
+
+    if (sent) {
+      out = "Emailed " + filename + " (" + String(content.length()) + " bytes) to " + to_email;
     } else {
       out = "ERR: " + email_err;
     }

@@ -16,6 +16,7 @@ bool file_memory_write_soul(const String &soul, String &error_out);
 
 // User profile (USER.md)
 bool file_memory_read_user(String &user_out, String &error_out);
+bool file_memory_append_user(const String &text, String &error_out);
 
 // Daily notes
 bool file_memory_append_daily(const String &note, String &error_out);

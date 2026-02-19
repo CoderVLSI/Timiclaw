@@ -68,6 +68,8 @@ struct HttpResult {
   String error;
 };
 
+} // namespace
+
 // Build a compact time-awareness context for the LLM
 String build_time_context() {
   struct tm timeinfo;
@@ -102,6 +104,8 @@ String build_time_context() {
   return "It is " + String(day_name) + " " + String(period) + ", " +
          time_str + " (" + date_str + ")";
 }
+
+namespace {
 
 String to_lower(String value) {
   value.toLowerCase();
@@ -959,6 +963,62 @@ bool llm_generate_heartbeat(const String &heartbeat_doc, String &reply_out, Stri
 
   task = "Heartbeat instructions:\n" + task + "\n\nGenerate current heartbeat update.";
   return llm_generate_with_custom_prompt(String(kHeartbeatSystemPrompt), task, false, reply_out, error_out);
+}
+
+bool llm_extract_user_facts(const String &user_message, const String &existing_profile,
+                            String &facts_out, String &error_out) {
+  static const char *kExtractPrompt =
+      "Extract ONLY new personal facts from the user's message. "
+      "Facts include: name, location, age, job, interests, preferences, schedule, family, pets. "
+      "If the user's existing profile already contains the fact, skip it. "
+      "Return ONLY the new facts as bullet points (- fact). "
+      "If no new facts found, return exactly: NONE";
+
+  String task = "User message: " + user_message;
+  if (existing_profile.length() > 0) {
+    String profile = existing_profile;
+    if (profile.length() > 600) {
+      profile = profile.substring(profile.length() - 600);
+    }
+    task += "\n\nExisting profile:\n" + profile;
+  }
+
+  String raw_out;
+  if (!llm_generate_with_custom_prompt(String(kExtractPrompt), task, false, raw_out, error_out)) {
+    return false;
+  }
+
+  raw_out.trim();
+  if (raw_out.length() == 0 || raw_out == "NONE" || raw_out.indexOf("NONE") >= 0) {
+    facts_out = "";
+    return true;
+  }
+
+  facts_out = raw_out;
+  return true;
+}
+
+bool llm_generate_proactive(const String &context, String &reply_out, String &error_out) {
+  static const char *kProactivePrompt =
+      "You are Timi, a proactive dinosaur assistant on ESP32. "
+      "Based on the context below, decide if you should send a proactive message to the user. "
+      "Good reasons to speak: weather alert, task reminder, time-based greeting, interesting follow-up. "
+      "If you have something useful to say, write a short friendly message (1-3 sentences). "
+      "If there's nothing useful, respond with exactly: SILENT";
+
+  String raw_out;
+  if (!llm_generate_with_custom_prompt(String(kProactivePrompt), context, false, raw_out, error_out)) {
+    return false;
+  }
+
+  raw_out.trim();
+  if (raw_out == "SILENT" || raw_out.indexOf("SILENT") >= 0) {
+    reply_out = "";
+    return true;
+  }
+
+  reply_out = raw_out;
+  return true;
 }
 
 bool llm_route_tool_command(const String &message, String &command_out, String &error_out) {

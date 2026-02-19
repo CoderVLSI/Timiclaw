@@ -118,6 +118,14 @@
 #define HEARTBEAT_INTERVAL_MS 600000
 #endif
 
+#ifndef PROACTIVE_ENABLED
+#define PROACTIVE_ENABLED 1
+#endif
+
+#ifndef PROACTIVE_INTERVAL_MS
+#define PROACTIVE_INTERVAL_MS 7200000  // 2 hours
+#endif
+
 #ifndef TIMEZONE_TZ
 #define TIMEZONE_TZ "UTC0"
 #endif

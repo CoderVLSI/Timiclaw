@@ -20,7 +20,17 @@ bool llm_parse_email_request(const String &message, String &to_out, String &subj
 bool llm_parse_update_request(const String &message, String &url_out, bool &should_update_out,
                               bool &check_github_out, String &error_out);
 
+// Auto-learn: extract personal facts from user messages
+bool llm_extract_user_facts(const String &user_message, const String &existing_profile,
+                            String &facts_out, String &error_out);
+
+// Proactive: generate a proactive message based on context
+bool llm_generate_proactive(const String &context, String &reply_out, String &error_out);
+
 // Fetch available models from a provider (e.g., OpenRouter)
 bool llm_fetch_provider_models(const String &provider, String &models_out, String &error_out);
+
+// Helper to get compact time string (e.g. "Wednesday morning, 14:32")
+String build_time_context();
 
 #endif

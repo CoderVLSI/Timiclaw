@@ -509,6 +509,25 @@ String agent_loop_process_message(const String &msg) {
 
   // Record history (Bot only, User recorded at ingress)
   record_bot_msg(response);
+
+  // Auto-learn: extract personal facts every 5th message
+  static int s_msg_counter = 0;
+  s_msg_counter++;
+  if (s_msg_counter % 5 == 0 && msg.length() > 10) {
+    String existing_user, user_err;
+    file_memory_read_user(existing_user, user_err);
+
+    String facts, facts_err;
+    if (llm_extract_user_facts(msg, existing_user, facts, facts_err)) {
+      if (facts.length() > 0) {
+        String append_err;
+        if (file_memory_append_user(facts, append_err)) {
+          Serial.println("[auto-learn] Learned: " + facts);
+          event_log_append("AUTO_LEARN: " + facts);
+        }
+      }
+    }
+  }
   
   return response;
 }
