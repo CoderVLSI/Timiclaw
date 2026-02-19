@@ -185,9 +185,6 @@ void build_help_text(String &out) {
   out += "/relay_set <pin> <0|1> - Control relay\n";
   out += "/flash_led [count] - Blink LED\n";
 #endif
-  out += "/reminder_set_daily <HH:MM> <msg> - Set reminder\n";
-  out += "/reminder_show - Show reminders\n";
-  out += "/reminder_clear - Clear reminders\n";
   out += "/cron_add <expr> | <cmd> - Add cron job\n";
   out += "/cron_list - List all cron jobs\n";
   out += "/cron_show - Show cron.md content\n";
@@ -256,7 +253,7 @@ void tool_registry_init() {
 #if ENABLE_PLAN
       "plan <task>, "
 #endif
-      "reminder_set_daily/reminder_show/reminder_clear, cron_add/cron_list/cron_show/cron_clear, timezone_show/timezone_set/timezone_clear, "
+      "cron_add/cron_list/cron_show/cron_clear, timezone_show/timezone_set/timezone_clear, "
 #if ENABLE_WEB_JOBS
       "webjob_set_daily/webjob_show/webjob_run/webjob_clear, "
       "web_files_make, "
@@ -2155,28 +2152,6 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
-  if (cmd_lc == "reminder_show" || cmd_lc == "remainder_show" || cmd_lc == "reminder_shiw") {
-    String hhmm;
-    String msg;
-    String err;
-    if (!persona_get_daily_reminder(hhmm, msg, err)) {
-      out = "ERR: " + err;
-      return true;
-    }
-    hhmm.trim();
-    msg.trim();
-    if (hhmm.length() == 0 || msg.length() == 0) {
-      out = "Daily reminder is empty";
-      return true;
-    }
-    if (is_webjob_message(msg)) {
-      out = "Daily web job " + hhmm + ":\nTask: " + webjob_task_from_message(msg);
-      return true;
-    }
-    out = "Daily reminder " + hhmm + ":\n" + msg;
-    return true;
-  }
-
 #if ENABLE_WEB_JOBS
   if (cmd_lc == "webjob_show") {
     String hhmm;
@@ -2196,16 +2171,6 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 #endif
-
-  if (cmd_lc == "reminder_clear") {
-    String err;
-    if (!persona_clear_daily_reminder(err)) {
-      out = "ERR: " + err;
-      return true;
-    }
-    out = "OK: daily reminder cleared";
-    return true;
-  }
 
   // Cron commands
   if (cmd_lc == "cron_add" || cmd_lc.startsWith("cron_add ")) {
@@ -2289,55 +2254,6 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 #endif
-
-  if (cmd_lc == "reminder_run") {
-    String hhmm;
-    String msg;
-    String err;
-    if (!persona_get_daily_reminder(hhmm, msg, err)) {
-      out = "ERR: " + err;
-      return true;
-    }
-    hhmm.trim();
-    msg.trim();
-    if (hhmm.length() == 0 || msg.length() == 0) {
-      out = "ERR: daily reminder is empty";
-      return true;
-    }
-    if (is_webjob_message(msg)) {
-#if ENABLE_WEB_JOBS
-      String task = webjob_task_from_message(msg);
-      if (task.length() == 0) {
-        out = "ERR: empty web job task";
-        return true;
-      }
-      String job_out;
-      if (!web_job_run(task, effective_timezone_for_jobs(), job_out, err)) {
-        out = "ERR: " + err;
-        return true;
-      }
-      out = "Web job (" + hhmm + "): " + task + "\n" + job_out;
-      return true;
-#else
-      out = "ERR: web jobs are not enabled";
-      return true;
-#endif
-    }
-    // Dynamic Reminder: Let the LLM "perform" the reminder
-    String prompt = "You are executing a scheduled daily reminder for the user. "
-                    "The reminder text is: \"" + msg + "\". "
-                    "If this is an instruction (e.g. 'send quotes', 'check weather'), perform it now. "
-                    "If it is a simple note (e.g. 'buy milk'), politely remind the user.";
-    
-    String reply;
-    String llm_err;
-    if (llm_generate_reply(prompt, reply, llm_err)) {
-      out = "⏰ Daily Reminder (" + hhmm + "):\n" + reply;
-    } else {
-      out = "Reminder (" + hhmm + "): " + msg + "\n(LLM failed: " + llm_err + ")";
-    }
-    return true;
-  }
 
 #if ENABLE_WEB_JOBS
   if (cmd_lc == "webjob_run") {
@@ -2545,157 +2461,6 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 #endif
-
-  if (cmd_lc == "reminder_set_daily" || cmd_lc.startsWith("reminder_set_daily ")) {
-    String tail = cmd.length() > 18 ? cmd.substring(18) : "";
-    tail.trim();
-    int sp = tail.indexOf(' ');
-    if (sp <= 0) {
-      out = "ERR: usage reminder_set_daily <HH:MM> <message>";
-      return true;
-    }
-
-    String hhmm = tail.substring(0, sp);
-    String message = tail.substring(sp + 1);
-    hhmm.trim();
-    message.trim();
-
-    if (!is_valid_hhmm(hhmm) || message.length() == 0) {
-      out = "ERR: usage reminder_set_daily <HH:MM> <message>";
-      return true;
-    }
-
-    String err;
-    if (!has_user_timezone()) {
-      s_pending_reminder_tz.active = true;
-      s_pending_reminder_tz.hhmm = hhmm;
-      s_pending_reminder_tz.message = message;
-      s_pending_reminder_tz.expires_ms = millis() + kPendingReminderTzMs;
-      clear_pending_reminder_details();
-      out = "Before I set that reminder, tell me your timezone.\n"
-            "Reply: timezone_set Asia/Kolkata";
-      return true;
-    }
-
-    if (!persona_set_daily_reminder(hhmm, message, err)) {
-      out = "ERR: " + err;
-      return true;
-    }
-    if (is_webjob_message(message)) {
-      event_log_append("WEBJOB set daily " + hhmm);
-    } else {
-      event_log_append("REMINDER set daily " + hhmm);
-    }
-    out = "OK: daily reminder set at " + hhmm + "\nMessage: " + reminder_message_for_user(message);
-    return true;
-  }
-
-  String changed_hhmm;
-  if (parse_natural_reminder_time_change(cmd, changed_hhmm)) {
-    String old_hhmm;
-    String old_message;
-    String err;
-    if (!persona_get_daily_reminder(old_hhmm, old_message, err)) {
-      out = "ERR: " + err;
-      return true;
-    }
-    old_hhmm.trim();
-    old_message.trim();
-    if (old_hhmm.length() == 0 || old_message.length() == 0) {
-      out = "ERR: daily reminder is empty";
-      return true;
-    }
-
-    if (!persona_set_daily_reminder(changed_hhmm, old_message, err)) {
-      out = "ERR: " + err;
-      return true;
-    }
-
-    if (is_webjob_message(old_message)) {
-      event_log_append("WEBJOB set daily " + changed_hhmm);
-      out = "OK: daily web job changed to " + changed_hhmm +
-            "\nTask: " + webjob_task_from_message(old_message);
-    } else {
-      event_log_append("REMINDER set daily " + changed_hhmm);
-      out = "OK: daily reminder changed to " + changed_hhmm +
-            "\nMessage: " + old_message;
-    }
-    return true;
-  }
-
-#if ENABLE_WEB_JOBS
-  String webjob_hhmm;
-  String webjob_task;
-  if (parse_natural_daily_webjob(cmd, webjob_hhmm, webjob_task)) {
-    String stored_message = encode_webjob_message(webjob_task);
-    String err;
-    if (!has_user_timezone()) {
-      s_pending_reminder_tz.active = true;
-      s_pending_reminder_tz.hhmm = webjob_hhmm;
-      s_pending_reminder_tz.message = stored_message;
-      s_pending_reminder_tz.expires_ms = millis() + kPendingReminderTzMs;
-      clear_pending_reminder_details();
-      out = "Got it. I need your timezone first.\n"
-            "Reply with your timezone, for example: timezone_set Asia/Kolkata";
-      return true;
-    }
-    if (!persona_set_daily_reminder(webjob_hhmm, stored_message, err)) {
-      out = "ERR: " + err;
-      return true;
-    }
-    event_log_append("WEBJOB set daily " + webjob_hhmm);
-    out = "OK: daily web job set at " + webjob_hhmm + "\nTask: " + webjob_task;
-    return true;
-  }
-#endif
-
-  if (has_daily_words(cmd_lc) && !cmd_lc.startsWith("reminder_") &&
-      !cmd_lc.startsWith("timezone_")) {
-    s_pending_reminder_details.active = true;
-    s_pending_reminder_details.expires_ms = millis() + kPendingReminderDetailsMs;
-    out = "Got it, daily.\nNow send time + message, for example:\n6 am send pls wake up";
-    return true;
-  }
-
-  String natural_hhmm;
-  String natural_message;
-  const bool assume_daily = s_pending_reminder_details.active;
-  if (parse_natural_daily_reminder(cmd, natural_hhmm, natural_message, assume_daily)) {
-    String err;
-    String natural_lc = natural_message;
-    natural_lc.toLowerCase();
-    const bool should_be_webjob = looks_like_webjob_task(natural_lc);
-    const String stored_message =
-        should_be_webjob ? encode_webjob_message(natural_message) : natural_message;
-    clear_pending_reminder_details();
-    if (!has_user_timezone()) {
-      s_pending_reminder_tz.active = true;
-      s_pending_reminder_tz.hhmm = natural_hhmm;
-      s_pending_reminder_tz.message = stored_message;
-      s_pending_reminder_tz.expires_ms = millis() + kPendingReminderTzMs;
-      clear_pending_reminder_details();
-      out = "Got it. I need your timezone first.\n"
-            "Reply with your timezone, for example: timezone_set Asia/Kolkata";
-      return true;
-    }
-    if (!persona_set_daily_reminder(natural_hhmm, stored_message, err)) {
-      out = "ERR: " + err;
-      return true;
-    }
-    if (should_be_webjob) {
-      event_log_append("WEBJOB set daily " + natural_hhmm);
-      out = "OK: daily web job set at " + natural_hhmm + "\nTask: " + natural_message;
-    } else {
-      event_log_append("REMINDER set daily " + natural_hhmm);
-      out = "OK: daily reminder set at " + natural_hhmm + "\nMessage: " + natural_message;
-    }
-    return true;
-  }
-
-  if (s_pending_reminder_details.active) {
-    out = "I still need both time and message.\nExample: 6 am send pls wake up";
-    return true;
-  }
 
   if (cmd_lc == "soul_show" || cmd_lc == "soul") {
     String soul, err;

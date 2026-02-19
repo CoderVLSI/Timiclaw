@@ -14,13 +14,9 @@ static incoming_cb_t s_dispatch_cb = nullptr;
 
 static unsigned long s_next_status_ms = 0;
 static unsigned long s_next_heartbeat_ms = 0;
-static unsigned long s_next_reminder_check_ms = 0;
 static bool s_time_configured = false;
 static String s_last_tz = "";
 static long s_last_tz_offset_seconds = 0;
-static int s_last_reminder_yday = -1;
-static int s_last_reminder_target_minute = -1;
-static int s_last_reminder_reason = -1;
 
 // Cron job tracking
 static unsigned long s_next_cron_check_ms = 0;
@@ -236,14 +232,6 @@ static void check_missed_cron_jobs(incoming_cb_t dispatch_cb) {
   Serial.printf("[scheduler] Missed job check complete, found %d missed job(s)\n", missed_count);
 }
 
-static void log_reminder_reason_once(int reason, const String &detail) {
-  if (reason == s_last_reminder_reason) {
-    return;
-  }
-  s_last_reminder_reason = reason;
-  event_log_append("SCHED reminder: " + detail);
-}
-
 void scheduler_init() {
   if (!AUTONOMOUS_STATUS_ENABLED) {
     Serial.println("[scheduler] autonomous status disabled");
@@ -258,9 +246,6 @@ void scheduler_init() {
     s_next_heartbeat_ms = millis() + HEARTBEAT_INTERVAL_MS;
     Serial.println("[scheduler] heartbeat enabled");
   }
-
-  s_next_reminder_check_ms = millis() + 5000;
-  Serial.println("[scheduler] daily reminder enabled");
 
   s_next_cron_check_ms = millis() + 5000;
   Serial.println("[scheduler] cron jobs enabled");
@@ -290,63 +275,6 @@ void scheduler_tick(incoming_cb_t dispatch_cb) {
       }
     }
     s_next_heartbeat_ms = now + HEARTBEAT_INTERVAL_MS;
-  }
-
-  if ((long)(now - s_next_reminder_check_ms) >= 0) {
-    s_next_reminder_check_ms = now + 15000;
-
-    String hhmm;
-    String message;
-    String err;
-    if (!persona_get_daily_reminder(hhmm, message, err)) {
-      return;
-    }
-    hhmm.trim();
-    message.trim();
-    if (hhmm.length() == 0 || message.length() == 0) {
-      log_reminder_reason_once(0, "empty");
-      return;
-    }
-
-    int target_h = -1;
-    int target_m = -1;
-    if (!parse_hhmm(hhmm, target_h, target_m)) {
-      log_reminder_reason_once(1, "invalid hhmm=" + hhmm);
-      return;
-    }
-    const int target_minute = target_h * 60 + target_m;
-
-    struct tm tm_now{};
-    if (!get_local_time_snapshot(tm_now)) {
-      log_reminder_reason_once(2, "no time sync");
-      return;
-    }
-    const int now_minute = tm_now.tm_hour * 60 + tm_now.tm_min;
-
-    if (now_minute < target_minute) {
-      log_reminder_reason_once(3, "before target now=" + String(tm_now.tm_hour) + ":" +
-                                      String(tm_now.tm_min) + " target=" + hhmm);
-      return;
-    }
-
-    const int late_by = now_minute - target_minute;
-    if (late_by > REMINDER_GRACE_MINUTES) {
-      log_reminder_reason_once(4, "too late by " + String(late_by) + "m target=" + hhmm);
-      return;
-    }
-
-    if (tm_now.tm_yday == s_last_reminder_yday &&
-        target_minute == s_last_reminder_target_minute) {
-      log_reminder_reason_once(5, "already sent today target=" + hhmm);
-      return;
-    }
-
-    dispatch_cb(String("reminder_run"));
-    event_log_append("SCHED: reminder_run target=" + hhmm + " now=" +
-                     String(tm_now.tm_hour) + ":" + String(tm_now.tm_min));
-    s_last_reminder_yday = tm_now.tm_yday;
-    s_last_reminder_target_minute = target_minute;
-    s_last_reminder_reason = -1;
   }
 
   // Cron job checking

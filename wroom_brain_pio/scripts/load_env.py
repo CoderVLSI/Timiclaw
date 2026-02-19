@@ -79,8 +79,6 @@ image_provider = parsed.get("IMAGE_PROVIDER", "none")
 image_api_key = parsed.get("IMAGE_API_KEY", "")
 
 resend_api_key = parsed.get("RESEND_API_KEY", "")
-email_provider = parsed.get("EMAIL_PROVIDER", "resend")
-sendgrid_api_key = parsed.get("SENDGRID_API_KEY", "")
 email_from = parsed.get("EMAIL_FROM", parsed.get("RESEND_FROM_EMAIL", "onboarding@resend.dev"))
 
 if (
@@ -162,8 +160,6 @@ generated_header.write_text(
             f"#define WEB_JOB_TIMEOUT_MS {web_job_timeout_ms}",
             f"#define IMAGE_PROVIDER {cpp_quoted(image_provider)}",
             f"#define IMAGE_API_KEY {cpp_quoted(image_api_key)}",
-            f"#define EMAIL_PROVIDER {cpp_quoted(email_provider)}",
-            f"#define SENDGRID_API_KEY {cpp_quoted(sendgrid_api_key)}",
             f"#define EMAIL_FROM {cpp_quoted(email_from)}",
             f"#define RESEND_API_KEY {cpp_quoted(resend_api_key)}",
             "",
