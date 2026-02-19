@@ -65,11 +65,13 @@ jobs:
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: latest
-        name: Latest Firmware
+        tag_name: v1.4.${{ github.run_number }}
+        name: Firmware v1.4.${{ github.run_number }}
         files: |
           artifacts/timiclaw-firmware.bin
           artifacts/timiclash-spiffs.bin
+        draft: false
+        prerelease: false
         body: |
           ## Latest TimiClaw Firmware
 
