@@ -56,6 +56,7 @@ static const ReactTool s_react_tools[] = {
     {"email_show", "Show current email draft", "none", "email_show"},
     {"email_clear", "Clear email draft", "none", "email_clear"},
     {"send_email", "Send an email directly", "<to> <subject> <message>", "send_email: user@example.com Meeting tomorrow Can we meet at 2pm?"},
+    {"email_files", "Generate and email website files (HTML, CSS, JS)", "<email> <topic>", "email_files: user@example.com portfolio site for photographer"},
 #endif
 
     // Image Generation
@@ -107,6 +108,8 @@ static const ReactTool s_react_tools[] = {
 
     // Web Generation
     {"web_files_make", "Generate and send website files (HTML, CSS, JS)", "<topic>", "web_files_make: personal portfolio, SaaS landing page"},
+    {"whatsapp_send", "Send a message via WhatsApp", "<message>", "whatsapp_send: Hello from TimiClaw!"},
+    {"whatsapp_send_files", "Generate and send website files via WhatsApp", "<topic>", "whatsapp_send_files: portfolio site for photographer"},
 
     // Pending Actions
     {"cancel", "Cancel any pending confirmation", "none", "cancel"},
@@ -410,6 +413,10 @@ bool react_agent_should_use(const String &query) {
       // Web generation triggers
       "make a", "create a", "generate a", "build a", "website", "html",
       "saas", "landing page", "portfolio", "app", "web app",
+      // Email triggers
+      "email me", "send email", "email those", "email the",
+      // WhatsApp triggers
+      "whatsapp", "send to whatsapp", "wa me", "via whatsapp",
       // Skill triggers
       "use skill", "use_skill", "skill"
   };

@@ -59,6 +59,15 @@
 #define LLM_GLM_BASE_URL "https://api.z.ai/api/coding/paas/v4"
 #endif
 
+// Antigravity OAuth (alternative LLM provider with multiple model options)
+#ifndef LLM_ANTIGRAVITY_BASE_URL
+#define LLM_ANTIGRAVITY_BASE_URL "https://api.antigravity.com"
+#endif
+
+#ifndef LLM_ANTIGRAVITY_OAUTH_TOKEN
+#define LLM_ANTIGRAVITY_OAUTH_TOKEN ""
+#endif
+
 #ifndef LLM_TIMEOUT_MS
 #define LLM_TIMEOUT_MS 60000
 #endif
@@ -188,6 +197,19 @@
 
 #ifndef WEB_JOB_TIMEOUT_MS
 #define WEB_JOB_TIMEOUT_MS 20000
+#endif
+
+// WhatsApp Baileys service endpoint
+#ifndef WHATSAPP_ENDPOINT_URL
+#define WHATSAPP_ENDPOINT_URL ""
+#endif
+
+#ifndef WHATSAPP_API_KEY
+#define WHATSAPP_API_KEY ""
+#endif
+
+#ifndef WHATSAPP_TIMEOUT_MS
+#define WHATSAPP_TIMEOUT_MS 15000
 #endif
 
 // GitHub repo for auto-updates (format: username/repo)

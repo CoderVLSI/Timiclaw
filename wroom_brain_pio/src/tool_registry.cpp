@@ -22,6 +22,7 @@
 #include "web_job_client.h"
 #include "web_server.h"
 #include "email_client.h"
+#include "whatsapp_client.h"
 #include "usage_stats.h"
 #include "skill_registry.h"
 
@@ -198,11 +199,14 @@ void build_help_text(String &out) {
   out += "/email_draft <to>|<subject>|<body> - Draft email\n";
   out += "/send_email <to> <subject> <msg> - Send email\n";
   out += "/email_code [email] - Email last code\n";
+  out += "/email_files <email> <topic> - Generate & email web files\n";
   out += "/files_list - List all SPIFFS files\n";
   out += "/files_get <filename> - Read a file\n";
   out += "/files_email <filename> <email> - Email a file\n";
   out += "/files_email_all <email> - Email all files\n";
 #endif
+  out += "/whatsapp_send <message> - Send via WhatsApp\n";
+  out += "/whatsapp_send_files <topic> - Generate & send files via WhatsApp\n";
   out += "/safe_mode - Toggle safe mode\n";
   out += "/logs - Show logs\n";
   out += "/logs_clear - Clear logs\n";
@@ -1007,6 +1011,89 @@ static bool send_small_web_files(const String &topic, String &out) {
   out += "🌐 Site live at: " + server_url;
   return true;
 }
+
+#if ENABLE_EMAIL
+// Build inline HTML with embedded CSS/JS for email
+static String build_inline_html_email(const String &topic, const String &css, const String &js) {
+  String inline_css = css;
+  // Convert CSS to inline style tag
+  inline_css.replace("\n", " ");
+
+  String inline_js = js;
+  // Keep JS in script tag
+
+  String t = topic;
+  t.trim();
+  if (t.length() == 0) {
+    t = "saas website";
+  }
+
+  String email_html =
+      "<!doctype html>\n"
+      "<html lang=\"en\">\n"
+      "<head>\n"
+      "  <meta charset=\"utf-8\" />\n"
+      "  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />\n"
+      "  <title>" + t + " | AI SaaS</title>\n"
+      "  <style>" + inline_css + "</style>\n"
+      "</head>\n"
+      "<body>\n"
+      "  <div class=\"bg-orb orb-a\"></div>\n"
+      "  <div class=\"bg-orb orb-b\"></div>\n"
+      "  <header class=\"nav\">\n"
+      "    <div class=\"brand\">clawflow</div>\n"
+      "    <a class=\"nav-cta\" href=\"#pricing\">Start Free</a>\n"
+      "  </header>\n"
+      "  <main class=\"hero reveal\">\n"
+      "    <p class=\"eyebrow\">Launch faster with automation</p>\n"
+      "    <h1>" + t + " that ships outcomes, not busywork.</h1>\n"
+      "    <p class=\"sub\">Automate repetitive ops, visualize growth, and keep teams aligned with a practical AI workflow stack.</p>\n"
+      "    <div class=\"actions\">\n"
+      "      <button id=\"demoBtn\" class=\"btn btn-primary\">Book Demo</button>\n"
+      "      <button id=\"tourBtn\" class=\"btn btn-ghost\">See Product Tour</button>\n"
+      "    </div>\n"
+      "    <p id=\"out\" class=\"out\"></p>\n"
+      "  </main>\n"
+      "  <section class=\"features\">\n"
+      "    <article class=\"card reveal\"><h3>Automations</h3><p>Build no-code flows for onboarding, support, and reporting.</p></article>\n"
+      "    <article class=\"card reveal\"><h3>Live Insights</h3><p>Track pipeline health, churn risk, and key metrics in one place.</p></article>\n"
+      "    <article class=\"card reveal\"><h3>Team Velocity</h3><p>Turn requests into prioritized tasks with transparent ownership.</p></article>\n"
+      "  </section>\n"
+      "  <section class=\"pricing reveal\" id=\"pricing\">\n"
+      "    <h2>Simple pricing</h2>\n"
+      "    <p>$29/mo starter, $99/mo growth, enterprise with custom SLAs.</p>\n"
+      "  </section>\n"
+      "  <script>" + inline_js + "</script>\n"
+      "</body>\n"
+      "</html>\n";
+
+  return email_html;
+}
+
+static bool email_small_web_files(const String &email, const String &topic, String &out) {
+  String html;
+  String css;
+  String js;
+  build_small_web_files(topic, html, css, js);
+
+  // Build inline HTML email
+  String email_html = build_inline_html_email(topic, css, js);
+
+  String subject = "Generated Web Files: " + topic;
+  String text_content = "HTML website files for: " + topic + "\n\nCheck the HTML version for the full interactive site.";
+
+  String err;
+  if (!email_send(email, subject, email_html, text_content, err)) {
+    out = "ERR: " + err;
+    return true;
+  }
+
+  event_log_append("EMAIL_WEBFILES sent to=" + email + " topic=" + topic);
+
+  out = "✅ Emailed web files for \"" + topic + "\" to " + email;
+  return true;
+}
+#endif
 
 static bool is_valid_hhmm(const String &value) {
   if (value.length() != 5 || value[2] != ':') {
@@ -2320,6 +2407,33 @@ bool tool_registry_execute(const String &input, String &out) {
     return send_small_web_files(topic, out);
   }
 
+#if ENABLE_EMAIL
+  if (cmd_lc.startsWith("email_files ") || cmd_lc.startsWith("email_files  ")) {
+    String remaining = cmd.substring(cmd.indexOf(' ') + 1);
+    remaining.trim();
+
+    // Parse: email_files <email> <topic>
+    int first_space = remaining.indexOf(' ');
+    if (first_space < 0) {
+      out = "ERR: usage email_files <email> <topic>";
+      return true;
+    }
+
+    String email = remaining.substring(0, first_space);
+    email.trim();
+
+    String topic = remaining.substring(first_space + 1);
+    topic = sanitize_web_topic(topic);
+
+    if (email.length() == 0 || email.indexOf('@') < 0) {
+      out = "ERR: usage email_files <email> <topic>";
+      return true;
+    }
+
+    return email_small_web_files(email, topic, out);
+  }
+#endif
+
   String web_files_topic;
   if (extract_web_files_topic_from_text(cmd, web_files_topic)) {
     return send_small_web_files(web_files_topic, out);
@@ -3571,6 +3685,48 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 #endif
+
+  // WhatsApp Tools
+  if (cmd_lc.startsWith("whatsapp_send ") || cmd_lc == "whatsapp_send") {
+    String message = cmd.length() > 14 ? cmd.substring(14) : "";
+    message.trim();
+
+    if (message.length() == 0) {
+      out = "ERR: usage whatsapp_send <message>";
+      return true;
+    }
+
+    String err;
+    if (!whatsapp_send_message(message, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+
+    event_log_append("WHATSAPP sent message");
+
+    out = "✅ Sent via WhatsApp: " + message.substring(0, 50) +
+          (message.length() > 50 ? "..." : "");
+    return true;
+  }
+
+  if (cmd_lc == "whatsapp_send_files" || cmd_lc.startsWith("whatsapp_send_files ")) {
+    String topic = cmd.length() > 19 ? cmd.substring(19) : "";
+    topic = sanitize_web_topic(topic);
+
+    String html, css, js;
+    build_small_web_files(topic, html, css, js);
+
+    String err;
+    if (!whatsapp_send_web_files(topic, html, css, js, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+
+    event_log_append("WHATSAPP sent web files topic=" + topic);
+
+    out = "✅ Sent web files via WhatsApp for \"" + topic + "\"";
+    return true;
+  }
 
   // Web Tools
   if (cmd_lc.startsWith("search ") || cmd_lc.startsWith("web_search ")) {
