@@ -2,8 +2,10 @@
 
 #include <FS.h>
 #include "SPIFFS.h"
+#include <time.h>
 
 #define CRON_FILENAME "/cron.md"
+#define LAST_CHECK_FILE "/cron_lastcheck.txt"
 
 // Cache of loaded jobs
 static CronJob s_cached_jobs[CRON_MAX_JOBS];
@@ -159,4 +161,87 @@ bool cron_store_get_content(String &content_out, String &error_out) {
 
 int cron_store_count() {
   return s_cached_count;
+}
+
+// ============================================================================
+// MISSED JOB TRACKING IMPLEMENTATION
+// ============================================================================
+
+time_t cron_store_get_last_check() {
+  if (!SPIFFS.exists(LAST_CHECK_FILE)) {
+    return 0;  // Never checked
+  }
+
+  File f = SPIFFS.open(LAST_CHECK_FILE, "r");
+  if (!f) {
+    return 0;
+  }
+
+  String timestamp_str = f.readStringUntil('\n');
+  f.close();
+
+  return (time_t)timestamp_str.toInt();
+}
+
+void cron_store_update_last_check(time_t timestamp) {
+  File f = SPIFFS.open(LAST_CHECK_FILE, "w");
+  if (f) {
+    f.println((unsigned long)timestamp);
+    f.close();
+  }
+}
+
+// Helper: Check if a time is within a cron job's schedule
+static bool matches_schedule(const CronJob &job, struct tm *tm_time) {
+  return cron_should_trigger(job, tm_time->tm_hour, tm_time->tm_min,
+                            tm_time->tm_mday, tm_time->tm_mon + 1, tm_time->tm_wday);
+}
+
+int cron_store_check_missed_jobs(time_t now, MissedJob *missed_jobs, int max_jobs) {
+  time_t last_check = cron_store_get_last_check();
+
+  // If never checked or last_check is invalid, no missed jobs to report
+  if (last_check == 0 || last_check >= now) {
+    return 0;
+  }
+
+  int missed_count = 0;
+  const time_t CHECK_INTERVAL = 3600;  // Check every hour
+
+  // Iterate through time from last_check to now
+  for (time_t t = last_check; t < now && missed_count < max_jobs; t += CHECK_INTERVAL) {
+    // Only check times that are exactly on the minute (scheduled times)
+    // We need to check if a job SHOULD have triggered at this time
+
+    struct tm *tm_check = localtime(&t);
+    int check_minute = tm_check->tm_hour * 60 + tm_check->tm_min;
+
+    // For each cron job, check if it should have triggered
+    for (int i = 0; i < s_cached_count && missed_count < max_jobs; i++) {
+      const CronJob &job = s_cached_jobs[i];
+
+      // Skip wildcard-only jobs (would trigger too often)
+      if (job.minute == -1) {
+        continue;  // Skip jobs with minute wildcard
+      }
+
+      // Check if this job should have triggered at this time
+      if (matches_schedule(job, tm_check)) {
+        // Found a missed job
+        missed_jobs[missed_count].command = job.command;
+        missed_jobs[missed_count].missed_hour = tm_check->tm_hour;
+        missed_jobs[missed_count].missed_minute = tm_check->tm_min;
+        missed_jobs[missed_count].missed_day = tm_check->tm_mday;
+        missed_jobs[missed_count].missed_month = tm_check->tm_mon + 1;
+        missed_jobs[missed_count].missed_weekday = tm_check->tm_wday;
+        missed_count++;
+      }
+    }
+  }
+
+  if (missed_count > 0) {
+    Serial.printf("[cron_store] Found %d missed job(s)\n", missed_count);
+  }
+
+  return missed_count;
 }

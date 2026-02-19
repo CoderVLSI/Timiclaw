@@ -9,6 +9,9 @@
 #include "persona_store.h"
 #include "cron_store.h"
 
+// Forward declaration for missed job callback
+static incoming_cb_t s_dispatch_cb = nullptr;
+
 static unsigned long s_next_status_ms = 0;
 static unsigned long s_next_heartbeat_ms = 0;
 static unsigned long s_next_reminder_check_ms = 0;
@@ -22,6 +25,7 @@ static int s_last_reminder_reason = -1;
 // Cron job tracking
 static unsigned long s_next_cron_check_ms = 0;
 static int s_last_cron_minute = -1;
+static bool s_checked_missed_jobs = false;  // Track if we've checked for missed jobs
 
 static String to_lower_copy(String value) {
   value.toLowerCase();
@@ -194,6 +198,44 @@ static bool get_local_time_snapshot(struct tm &tm_out) {
   return true;
 }
 
+// Check for missed cron jobs (runs once after time sync)
+static void check_missed_cron_jobs(incoming_cb_t dispatch_cb) {
+  if (s_checked_missed_jobs) {
+    return;  // Already checked
+  }
+
+  time_t now = time(nullptr);
+  if (now < 1700000000) {
+    return;  // Time not synced yet
+  }
+
+  MissedJob missed[10];
+  int missed_count = cron_store_check_missed_jobs(now, missed, 10);
+
+  if (missed_count > 0) {
+    for (int i = 0; i < missed_count; i++) {
+      String cmd = missed[i].command;
+      cmd.trim();
+
+      char time_buf[32];
+      snprintf(time_buf, sizeof(time_buf), "%02d:%02d",
+               missed[i].missed_hour, missed[i].missed_minute);
+
+      String msg = "🔄 Missed job from " + String(time_buf) + ": " + cmd;
+      event_log_append("SCHED: " + msg);
+      dispatch_cb(cmd);
+
+      Serial.printf("[scheduler] Triggering missed job: %s\n", msg.c_str());
+    }
+  }
+
+  // Update last check time to now
+  cron_store_update_last_check(now);
+  s_checked_missed_jobs = true;
+
+  Serial.printf("[scheduler] Missed job check complete, found %d missed job(s)\n", missed_count);
+}
+
 static void log_reminder_reason_once(int reason, const String &detail) {
   if (reason == s_last_reminder_reason) {
     return;
@@ -311,6 +353,9 @@ void scheduler_tick(incoming_cb_t dispatch_cb) {
   if ((long)(now - s_next_cron_check_ms) >= 0) {
     s_next_cron_check_ms = now + 15000;
 
+    // Check for missed jobs on first successful time sync
+    check_missed_cron_jobs(dispatch_cb);
+
     struct tm tm_now{};
     if (!get_local_time_snapshot(tm_now)) {
       // No time sync yet, skip cron check
@@ -338,6 +383,12 @@ void scheduler_tick(incoming_cb_t dispatch_cb) {
           dispatch_cb(cmd);
           Serial.printf("[scheduler] Cron job triggered: %s\n", cmd.c_str());
         }
+      }
+
+      // Update last check time after successful check
+      time_t current_time = time(nullptr);
+      if (current_time >= 1700000000) {
+        cron_store_update_last_check(current_time);
       }
     }
   }

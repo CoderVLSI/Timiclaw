@@ -138,6 +138,7 @@ String build_react_system_prompt() {
          "- Read tool results, THINK again, continue\n"
          "- Use ANSWER when task is complete\n"
          "- Be brief and helpful\n"
+         "- For SCHEDULING: Prefer cron_add over reminder_set_daily (cron.md supports multiple jobs)\n"
          "- Max " + String(REACT_MAX_ITERATIONS) + " thinking cycles\n\n"
          "Your tools:";
 }
