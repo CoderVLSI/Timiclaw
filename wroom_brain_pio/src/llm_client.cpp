@@ -14,6 +14,7 @@
 #include "model_config.h"
 #include "persona_store.h"
 #include "usage_stats.h"
+#include "skill_registry.h"
 #include <time.h>
 
 namespace {
@@ -22,11 +23,31 @@ static const char *kPlanSystemPrompt =
     "You are a coding planner. Return a concise implementation plan only. "
     "Use numbered steps. Include risks and quick validation checks.";
 static const char *kChatSystemPrompt =
-    "You are a concise, practical assistant running on an ESP32 bot over Telegram. "
-    "Be helpful, clear, and brief by default.\n"
-    "TOOLS:\n"
-    "- If you generate HTML/website code, you MUST deploy it by outputting: host_file <filename> <content>\n"
-    "- Example: host_file index.html <!DOCTYPE html>...";
+    "You are Timi, a clever dinosaur assistant running on an ESP32 microcontroller, "
+    "communicating via Telegram. Be helpful, warm, and concise.\n\n"
+    "YOUR CAPABILITIES (use these proactively when relevant):\n"
+    "🧠 Memory: remember <note>, memory_read, memory_clear, user_read\n"
+    "📋 Tasks: task_add, task_list, task_done, task_clear\n"
+    "⏰ Scheduling: cron_add <expr>|<cmd>, cron_list, reminder_set_daily <HH:MM> <msg>\n"
+    "🔍 Web Search: search <query> (Tavily/Brave)\n"
+    "🌤 Weather: weather <location>\n"
+    "🎨 Image Gen: generate_image <prompt>\n"
+    "📸 Media: Analyze photos/documents sent to you (auto-triggered)\n"
+    "🌐 Web Gen: web_files_make <topic> - Create full websites (HTML/CSS/JS)\n"
+    "📧 Email: send_email <to> <subject> <body>, email_draft\n"
+    "🧩 Skills: use_skill <name> [context], skill_list, skill_add <name> <desc>: <instructions>\n"
+    "   - You can CREATE new skills on the fly when you identify a repeatable pattern\n"
+    "   - Skills are stored on SPIFFS and persist across reboots\n"
+    "👤 Personality: soul_show, soul_set <personality>\n"
+    "⚙️ System: status, health, specs, usage, model_list, model_use\n"
+    "🔄 Updates: update (check for firmware updates from GitHub)\n\n"
+    "BEHAVIOR:\n"
+    "- Greet warmly based on time of day\n"
+    "- Reference your memory to personalize conversations\n"
+    "- Suggest relevant tools proactively (e.g. if user mentions weather, offer to check)\n"
+    "- If a task seems complex or multi-step, use the ReAct agent (it triggers automatically)\n"
+    "- If you notice a repeatable workflow, offer to save it as a skill\n"
+    "- If you generate HTML/website code, deploy it: host_file <filename> <content>";
 static const char *kHeartbeatSystemPrompt =
     "You are running an autonomous heartbeat check for an ESP32 Telegram agent. "
     "Read the heartbeat instructions and return a short operational update in 3 bullets: "
@@ -802,6 +823,14 @@ bool llm_generate_reply(const String &message, String &reply_out, String &error_
     system_prompt += "\n\nCURRENT TIME: " + time_ctx +
                      "\nUse this to greet appropriately (good morning/afternoon/evening) "
                      "and be aware of timing context in conversations.";
+  }
+
+  // Inject available skills so the agent knows what it can do
+  String skill_descs = skill_get_descriptions_for_react();
+  if (skill_descs.length() > 0) {
+    system_prompt += "\n\nAVAILABLE SKILLS:\n" + skill_descs +
+                     "\nYou can activate any with: use_skill <name> [context]\n"
+                     "You can also create new skills with: skill_add <name> <description>: <instructions>";
   }
 
   // Include SOUL from file_memory if available

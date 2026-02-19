@@ -23,6 +23,8 @@ static const ReactTool s_react_tools[] = {
     {"memory_read", "Read all stored memories from MEMORY.md", "none", "memory_read"},
     {"memory_clear", "Clear all stored memories from MEMORY.md", "none", "memory_clear"},
     {"file_memory", "Show SPIFFS file system info", "none", "file_memory"},
+    {"files_list", "List all files in SPIFFS", "none", "files_list"},
+    {"files_get", "Read a file from SPIFFS", "<filename>", "files_get: cron.md"},
     {"user_read", "Read user profile (USER.md)", "none", "user_read"},
     {"soul_show", "Show current personality/soul (SOUL.md)", "none", "soul_show"},
     {"soul_set", "Set new personality/soul (SOUL.md)", "<soul description>", "soul_set: You are a helpful robot assistant"},
@@ -114,6 +116,9 @@ static const ReactTool s_react_tools[] = {
     // Skills
     {"use_skill", "Activate a skill by name (lazy-loaded from SPIFFS)", "<skill_name> [extra context]", "use_skill frontend_dev build a portfolio site"},
     {"skill_list", "List all available agent skills", "none", "skill_list"},
+    {"skill_show", "Show full content of a skill", "<skill_name>", "skill_show morning_briefing"},
+    {"skill_add", "Create a new reusable skill on SPIFFS", "<name> <description>: <step-by-step instructions>", "skill_add debug_helper Debug code issues: 1. Ask for error message 2. Analyze code 3. Suggest fix"},
+    {"skill_remove", "Delete a skill from SPIFFS", "<skill_name>", "skill_remove old_skill"},
 };
 // clang-format on
 

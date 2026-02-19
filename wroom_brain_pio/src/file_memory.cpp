@@ -562,3 +562,84 @@ bool file_memory_get_info(String &info_out, String &error_out) {
 
   return true;
 }
+
+bool file_memory_list_files(String &list_out, String &error_out) {
+  if (!g_backend_ready) {
+    error_out = "Filesystem not ready";
+    return false;
+  }
+
+  list_out = "📁 SPIFFS Files:\n\n";
+
+#if ENABLE_SD_CARD
+  if (g_backend == FileBackend::SD_CARD) {
+    File root = SD.open("/");
+    if (!root) {
+      error_out = "Failed to open SD root";
+      return false;
+    }
+
+    File file = root.openNextFile();
+    while (file) {
+      String name = file.name();
+      if (!file.isDirectory()) {
+        list_out += "• " + name + " (" + String(file.size()) + " bytes)\n";
+      }
+      file = root.openNextFile();
+    }
+    root.close();
+    return true;
+  }
+#endif
+
+  // SPIFFS
+  File root = SPIFFS.open("/");
+  if (!root) {
+    error_out = "Failed to open SPIFFS root";
+    return false;
+  }
+
+  File file = root.openNextFile();
+  while (file) {
+    String name = file.name();
+    if (!file.isDirectory()) {
+      list_out += "• " + name + " (" + String(file.size()) + " bytes)\n";
+    }
+    file = root.openNextFile();
+  }
+  root.close();
+
+  return true;
+}
+
+bool file_memory_read_file(const String &filename, String &content_out, String &error_out) {
+  if (!g_backend_ready) {
+    error_out = "Filesystem not ready";
+    return false;
+  }
+
+  String path = filename;
+  path.trim();
+
+  // Don't add leading slash if already present
+  if (!path.startsWith("/") && !path.startsWith("/memory/") &&
+      !path.startsWith("/config/") && !path.startsWith("/sessions/")) {
+    path = "/" + path;
+  }
+
+  if (!fs_exists(path.c_str())) {
+    error_out = "File not found: " + filename;
+    return false;
+  }
+
+  fs::File f = fs_open(path.c_str(), FILE_READ);
+  if (!f) {
+    error_out = "Failed to open file: " + filename;
+    return false;
+  }
+
+  content_out = f.readString();
+  f.close();
+
+  return true;
+}

@@ -198,6 +198,10 @@ void build_help_text(String &out) {
   out += "/email_draft <to>|<subject>|<body> - Draft email\n";
   out += "/send_email <to> <subject> <msg> - Send email\n";
   out += "/email_code [email] - Email last code\n";
+  out += "/files_list - List all SPIFFS files\n";
+  out += "/files_get <filename> - Read a file\n";
+  out += "/files_email <filename> <email> - Email a file\n";
+  out += "/files_email_all <email> - Email all files\n";
 #endif
   out += "/safe_mode - Toggle safe mode\n";
   out += "/logs - Show logs\n";
@@ -3082,6 +3086,137 @@ bool tool_registry_execute(const String &input, String &out) {
     String email_err;
     if (email_send(to, subject, "", code_content, email_err)) {
       out = "Code emailed to " + to;
+    } else {
+      out = "ERR: " + email_err;
+    }
+    return true;
+  }
+
+  // files_list - List all files in SPIFFS
+  if (cmd_lc == "files_list" || cmd_lc == "files list" || cmd_lc == "list files") {
+    String list, err;
+    if (!file_memory_list_files(list, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = list;
+    return true;
+  }
+
+  // files_get - Read a file from SPIFFS
+  if (cmd_lc.startsWith("files_get ") || cmd_lc.startsWith("files get ") ||
+      cmd_lc.startsWith("read_file ")) {
+    String filename = cmd.substring(cmd.indexOf(" ") + 1);
+    filename.trim();
+    if (filename.length() == 0) {
+      out = "ERR: usage: files_get <filename>";
+      return true;
+    }
+
+    String content, err;
+    if (!file_memory_read_file(filename, content, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+
+    // Truncate if too long for Telegram
+    if (content.length() > 3000) {
+      out = "📄 " + filename + ":\n" + content.substring(0, 3000) + "\n\n... (truncated, use files_email to get full file)";
+    } else {
+      out = "📄 " + filename + ":\n" + content;
+    }
+    return true;
+  }
+
+  // files_email - Email a specific file
+  if (cmd_lc.startsWith("files_email ") || cmd_lc.startsWith("email file ")) {
+    String tail = cmd.substring(cmd.indexOf(" ") + 1);
+    tail.trim();
+
+    // Parse: files_email <filename> <email>
+    int space_idx = tail.indexOf(' ');
+    if (space_idx <= 0) {
+      out = "ERR: usage: files_email <filename> <email>";
+      return true;
+    }
+
+    String filename = tail.substring(0, space_idx);
+    String to_email = tail.substring(space_idx + 1);
+    filename.trim();
+    to_email.trim();
+
+    if (filename.length() == 0 || to_email.length() == 0) {
+      out = "ERR: usage: files_email <filename> <email>";
+      return true;
+    }
+
+    String content, err;
+    if (!file_memory_read_file(filename, content, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+
+    String subject = "File from ESP32 Bot: " + filename;
+    String email_err;
+    if (email_send(to_email, subject, "", content, email_err)) {
+      out = "Emailed " + filename + " to " + to_email;
+    } else {
+      out = "ERR: " + email_err;
+    }
+    return true;
+  }
+
+  // files_email_all - Email all files
+  if (cmd_lc.startsWith("files_email_all ") || cmd_lc.startsWith("email all files ")) {
+    String to_email = cmd.substring(cmd.indexOf(" ") + 1);
+    to_email.trim();
+
+    if (to_email.length() == 0) {
+      out = "ERR: usage: files_email_all <email>";
+      return true;
+    }
+
+    // Get list of files
+    String list, err;
+    if (!file_memory_list_files(list, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+
+    // Count files and extract names
+    int file_count = 0;
+    String files[20];  // Max 20 files
+    int idx = 0;
+    while ((idx = list.indexOf("• ", idx)) >= 0 && file_count < 20) {
+      idx += 2;  // Skip "• "
+      int space_idx = list.indexOf(" (", idx);
+      if (space_idx > idx) {
+        files[file_count++] = list.substring(idx, space_idx);
+        idx = space_idx;
+      } else {
+        break;
+      }
+    }
+
+    if (file_count == 0) {
+      out = "No files to email";
+      return true;
+    }
+
+    // Read all files and create combined content
+    String all_content = "📁 All SPIFFS Files:\n\n";
+    for (int i = 0; i < file_count; i++) {
+      String content, file_err;
+      if (file_memory_read_file(files[i], content, file_err)) {
+        all_content += "\n\n======== " + files[i] + " ========\n\n";
+        all_content += content;
+      }
+    }
+
+    String subject = "All files from ESP32 Bot (" + String(file_count) + " files)";
+    String email_err;
+    if (email_send(to_email, subject, "", all_content, email_err)) {
+      out = "Emailed " + String(file_count) + " files to " + to_email;
     } else {
       out = "ERR: " + email_err;
     }
