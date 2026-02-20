@@ -541,10 +541,14 @@ String agent_loop_process_message(const String &msg) {
           // start_idx stays the same because the string shrank around it
         }
 
+        // Send any generated code as actual files via Telegram
+        extract_and_send_code_blocks(response);
+
         if (response.length() > 1400) {
           response = response.substring(0, 1400) + "...";
         }
         handled = true;
+
       } else {
         response = "ERR: " + err;
         handled = true;
