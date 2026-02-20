@@ -26,6 +26,7 @@ static void cmd_help() {
     shell_println("  ls         - List files");
     shell_println("  ps         - List tasks (alias: top)");
     shell_println("  cat <file> - Print file content");
+    shell_println("  nano <f> <c>- Write content to file");
     shell_println("  touch <f>  - Create empty file");
     shell_println("  mkdir <d>  - Create directory (simulated)");
     shell_println("  rm <file>  - Delete a file");
@@ -107,6 +108,46 @@ static void cmd_mkdir(const String &path) {
     }
 }
 
+static void cmd_nano(const String &args) {
+    int firstSpace = args.indexOf(' ');
+    if (firstSpace < 0) {
+        cmd_cat(args);
+        return;
+    }
+    String path = args.substring(0, firstSpace);
+    String content = args.substring(firstSpace + 1);
+    String p = resolve_path(path);
+    
+    File f = SPIFFS.open(p, "w");
+    if (f) {
+        f.print(content);
+        f.close();
+        shell_println("Nano: Wrote " + String(content.length()) + " bytes to " + p);
+    } else {
+        shell_println("Nano: Error writing " + p);
+    }
+}
+
+static void cmd_append(const String &args) {
+    int firstSpace = args.indexOf(' ');
+    if (firstSpace < 0) {
+        shell_println("Usage: append <file> <text>");
+        return;
+    }
+    String path = args.substring(0, firstSpace);
+    String content = args.substring(firstSpace + 1);
+    String p = resolve_path(path);
+    
+    File f = SPIFFS.open(p, "a");
+    if (f) {
+        f.print(content);
+        f.close();
+        shell_println("Append: Added " + String(content.length()) + " bytes to " + p);
+    } else {
+        shell_println("Append: Error writing " + p);
+    }
+}
+
 static void cmd_rm(const String &path) {
     String p = resolve_path(path);
     if (SPIFFS.remove(p)) {
@@ -183,6 +224,12 @@ void shell_run_once(const String &input, String &output) {
     }
     else if (cmd_line.startsWith("cat ")) {
         cmd_cat(cmd_line.substring(4));
+    }
+    else if (cmd_line.startsWith("nano ")) {
+        cmd_nano(cmd_line.substring(5));
+    }
+    else if (cmd_line.startsWith("append ")) {
+        cmd_append(cmd_line.substring(7));
     }
     else if (cmd_line.startsWith("touch ")) {
         cmd_touch(cmd_line.substring(6));

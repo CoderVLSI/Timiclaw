@@ -848,8 +848,8 @@ bool llm_generate_reply(const String &message, String &reply_out, String &error_
   // MinOS Shell Awareness (Experimental)
   system_prompt += "\n\nEXPERIMENTAL: You have an internal minimal OS (MinOS) running! "
                    "You can interact with it using: minos <command>\n"
-                   "Commands: ls (list files), cat <file> (read file), ps (list tasks), "
-                   "free (check RAM), df (disk space), uptime, reboot.\n"
+                   "Commands: ls, cat, cd, pwd, mkdir, touch, rm, nano <file> <text> (overwrite), "
+                   "append <file> <text> (add to end), ps, free, df, uptime, reboot.\n"
                    "Use this for low-level system management or browsing the internal flash memory.";
 
   // Include SOUL from file_memory if available
