@@ -842,8 +842,15 @@ bool llm_generate_reply(const String &message, String &reply_out, String &error_
   if (skill_descs.length() > 0) {
     system_prompt += "\n\nAVAILABLE SKILLS:\n" + skill_descs +
                      "\nYou can activate any with: use_skill <name> [context]\n"
-                     "You can also create new skills with: skill_add <name> <description>: <instructions>";
+                      "You can also create new skills with: skill_add <name> <description>: <instructions>";
   }
+
+  // MinOS Shell Awareness (Experimental)
+  system_prompt += "\n\nEXPERIMENTAL: You have an internal minimal OS (MinOS) running! "
+                   "You can interact with it using: minos <command>\n"
+                   "Commands: ls (list files), cat <file> (read file), ps (list tasks), "
+                   "free (check RAM), df (disk space), uptime, reboot.\n"
+                   "Use this for low-level system management or browsing the internal flash memory.";
 
   // Include SOUL from file_memory if available
   String soul_text;

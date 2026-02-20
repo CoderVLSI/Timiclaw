@@ -22,6 +22,7 @@
 #include "web_server.h"
 #include "react_agent.h"
 #include "skill_registry.h"
+#include "minos/minos.h"
 
 // Store last LLM response for emailing code
 static String s_last_llm_response = "";
@@ -37,6 +38,15 @@ struct AgentTaskMsg {
 static QueueHandle_t s_agent_queue = NULL;
 
 static void send_reply_via_telegram(const String &outgoing);
+
+// MinOS Kernel Task
+static void minos_task_code(void *pvParameters) {
+  Serial.println("[minos] Task started");
+  kernel_init();
+  shell_init();
+  kernel_start(); // This runs the cooperative loop
+  vTaskDelete(NULL);
+}
 
 static void agent_task_code(void *param) {
   AgentTaskMsg item;
@@ -632,6 +642,10 @@ void agent_loop_init() {
   usage_init();
   status_led_init();
   scheduler_init();
+
+  // Create MinOS Background Task
+  xTaskCreate(minos_task_code, "MinOSTask", 8192, NULL, 1, NULL);
+
   transport_telegram_init();
   web_server_init();
   Serial.println("[agent] init complete");

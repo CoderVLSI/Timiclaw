@@ -25,6 +25,7 @@
 #include "discord_client.h"
 #include "usage_stats.h"
 #include "skill_registry.h"
+#include "minos/minos.h"
 
 namespace {
 
@@ -3753,6 +3754,16 @@ bool tool_registry_execute(const String &input, String &out) {
 
   if (cmd_lc == "time" || cmd_lc == "what time is it" || cmd_lc == "current time") {
     return tool_web_time(out);
+  }
+
+  // MinOS Bridge
+  if (cmd_lc == "minos" || cmd_lc.startsWith("minos ")) {
+    String minos_cmd = cmd.length() > 6 ? cmd.substring(6) : "help";
+    minos_cmd.trim();
+    String minos_out;
+    shell_run_once(minos_cmd, minos_out);
+    out = "🦖 MinOS Shell Output:\n" + minos_out;
+    return true;
   }
 
   return false;

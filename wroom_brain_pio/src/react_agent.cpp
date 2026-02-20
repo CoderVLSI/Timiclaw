@@ -122,6 +122,7 @@ static const ReactTool s_react_tools[] = {
     {"skill_show", "Show full content of a skill", "<skill_name>", "skill_show morning_briefing"},
     {"skill_add", "Create a new reusable skill on SPIFFS", "<name> <description>: <step-by-step instructions>", "skill_add debug_helper Debug code issues: 1. Ask for error message 2. Analyze code 3. Suggest fix"},
     {"skill_remove", "Delete a skill from SPIFFS", "<skill_name>", "skill_remove old_skill"},
+    {"minos", "Execute a MinOS shell command (ls, cat, ps, free, df, uptime, reboot)", "<command>", "minos: ls"},
 };
 // clang-format on
 
