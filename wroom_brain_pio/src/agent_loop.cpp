@@ -495,6 +495,30 @@ String agent_loop_process_message(const String &msg) {
       String err;
       if (llm_generate_reply(trimmed, response, err)) {
         s_last_llm_response = response;
+        
+        // Scan for and execute embedded tool calls in backticks
+        // Example: `cron_add 10 12 * * * | hi`
+        int start_idx = 0;
+        while (true) {
+          int open_tick = response.indexOf('`', start_idx);
+          if (open_tick < 0) break;
+          int close_tick = response.indexOf('`', open_tick + 1);
+          if (close_tick < 0) break;
+          
+          String embedded_cmd = response.substring(open_tick + 1, close_tick);
+          embedded_cmd.trim();
+          
+          if (embedded_cmd.length() > 0) {
+            String tool_res;
+            if (tool_registry_execute(embedded_cmd, tool_res)) {
+              event_log_append("EMBEDDED tool: " + embedded_cmd);
+              Serial.println("[agent] Executed embedded tool: " + embedded_cmd);
+              response += "\n\n(OK: " + tool_res + ")";
+            }
+          }
+          start_idx = close_tick + 1;
+        }
+
         if (response.length() > 1400) {
           response = response.substring(0, 1400) + "...";
         }

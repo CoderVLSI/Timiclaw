@@ -22,7 +22,7 @@
 #include "web_job_client.h"
 #include "web_server.h"
 #include "email_client.h"
-#include "whatsapp_client.h"
+#include "discord_client.h"
 #include "usage_stats.h"
 #include "skill_registry.h"
 
@@ -205,8 +205,8 @@ void build_help_text(String &out) {
   out += "/files_email <filename> <email> - Email a file\n";
   out += "/files_email_all <email> - Email all files\n";
 #endif
-  out += "/whatsapp_send <message> - Send via WhatsApp\n";
-  out += "/whatsapp_send_files <topic> - Generate & send files via WhatsApp\n";
+  out += "/discord_send <message> - Send via Discord Webhook\n";
+  out += "/discord_send_files <topic> - Generate & send files via Discord\n";
   out += "/safe_mode - Toggle safe mode\n";
   out += "/logs - Show logs\n";
   out += "/logs_clear - Clear logs\n";
@@ -2180,6 +2180,11 @@ bool tool_registry_execute(const String &input, String &out) {
   }
 #endif
 
+  if (cmd_lc == "time" || cmd_lc == "time_show") {
+    scheduler_time_debug(out);
+    return true;
+  }
+
   if (cmd_lc == "timezone_show") {
     String tz;
     String err;
@@ -3687,44 +3692,41 @@ bool tool_registry_execute(const String &input, String &out) {
 #endif
 
   // WhatsApp Tools
-  if (cmd_lc.startsWith("whatsapp_send ") || cmd_lc == "whatsapp_send") {
-    String message = cmd.length() > 14 ? cmd.substring(14) : "";
+  if (cmd_lc.startsWith("discord_send ") || cmd_lc == "discord_send") {
+    String message = cmd.length() > 13 ? cmd.substring(13) : "";
     message.trim();
 
     if (message.length() == 0) {
-      out = "ERR: usage whatsapp_send <message>";
+      out = "ERR: usage discord_send <message>";
       return true;
     }
 
     String err;
-    if (!whatsapp_send_message(message, err)) {
-      out = "ERR: " + err;
+    if (!discord_send_message(message, err)) {
+      out = "ERR: Discord send failed: " + err;
       return true;
     }
 
-    event_log_append("WHATSAPP sent message");
-
-    out = "✅ Sent via WhatsApp: " + message.substring(0, 50) +
-          (message.length() > 50 ? "..." : "");
+    out = "OK: Message sent via Discord";
+    event_log_append("DISCORD msg");
     return true;
   }
 
-  if (cmd_lc == "whatsapp_send_files" || cmd_lc.startsWith("whatsapp_send_files ")) {
+  if (cmd_lc == "discord_send_files" || cmd_lc.startsWith("discord_send_files ")) {
     String topic = cmd.length() > 19 ? cmd.substring(19) : "";
     topic = sanitize_web_topic(topic);
 
-    String html, css, js;
+    String html, css, js, err;
+    // Generate the files
     build_small_web_files(topic, html, css, js);
 
-    String err;
-    if (!whatsapp_send_web_files(topic, html, css, js, err)) {
-      out = "ERR: " + err;
+    if (!discord_send_web_files(topic, html, css, js, err)) {
+      out = "ERR: Discord send failed: " + err;
       return true;
     }
 
-    event_log_append("WHATSAPP sent web files topic=" + topic);
-
-    out = "✅ Sent web files via WhatsApp for \"" + topic + "\"";
+    out = "OK: Files generated and sent via Discord";
+    event_log_append("DISCORD files " + topic);
     return true;
   }
 

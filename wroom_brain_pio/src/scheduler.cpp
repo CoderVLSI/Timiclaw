@@ -184,7 +184,7 @@ static void ensure_time_configured() {
   Serial.println("[scheduler] time sync configured: " + tz + " offset=" + String((long)offset));
 }
 
-static bool get_local_time_snapshot(struct tm &tm_out) {
+bool scheduler_get_local_time(struct tm &tm_out) {
   ensure_time_configured();
   time_t now = time(nullptr);
   if (now < 1700000000) {
@@ -300,7 +300,7 @@ void scheduler_tick(incoming_cb_t dispatch_cb) {
     check_missed_cron_jobs(dispatch_cb);
 
     struct tm tm_now{};
-    if (!get_local_time_snapshot(tm_now)) {
+    if (!scheduler_get_local_time(tm_now)) {
       // No time sync yet, skip cron check
       return;
     }

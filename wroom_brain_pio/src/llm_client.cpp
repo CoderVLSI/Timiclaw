@@ -15,6 +15,7 @@
 #include "persona_store.h"
 #include "usage_stats.h"
 #include "skill_registry.h"
+#include "scheduler.h"
 #include <time.h>
 
 namespace {
@@ -73,7 +74,7 @@ struct HttpResult {
 // Build a compact time-awareness context for the LLM
 String build_time_context() {
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
+  if (!scheduler_get_local_time(timeinfo)) {
     return "";  // NTP not synced yet
   }
 
@@ -827,6 +828,13 @@ bool llm_generate_reply(const String &message, String &reply_out, String &error_
     system_prompt += "\n\nCURRENT TIME: " + time_ctx +
                      "\nUse this to greet appropriately (good morning/afternoon/evening) "
                      "and be aware of timing context in conversations.";
+  }
+
+  String stored_tz;
+  String tz_err;
+  if (!persona_get_timezone(stored_tz, tz_err) || stored_tz.length() == 0) {
+    system_prompt += "\n\nCRITICAL: User timezone is NOT SET! If they ask to schedule a cron job, reminder, or ask for the time, "
+                     "STOP and explicitly ask them 'What City/Country are you in?' FIRST. Then use the timezone_set tool.";
   }
 
   // Inject available skills so the agent knows what it can do

@@ -108,8 +108,8 @@ static const ReactTool s_react_tools[] = {
 
     // Web Generation
     {"web_files_make", "Generate and send website files (HTML, CSS, JS)", "<topic>", "web_files_make: personal portfolio, SaaS landing page"},
-    {"whatsapp_send", "Send a message via WhatsApp", "<message>", "whatsapp_send: Hello from TimiClaw!"},
-    {"whatsapp_send_files", "Generate and send website files via WhatsApp", "<topic>", "whatsapp_send_files: portfolio site for photographer"},
+    {"discord_send", "Send a message via Discord Webhook", "<message>", "discord_send: Hello from TimiClaw!"},
+    {"discord_send_files", "Generate and send website files via Discord Webhook", "<topic>", "discord_send_files: portfolio site for photographer"},
 
     // Pending Actions
     {"cancel", "Cancel any pending confirmation", "none", "cancel"},
@@ -407,7 +407,8 @@ bool react_agent_should_use(const String &query) {
   // Keywords that suggest multi-step reasoning OR web generation
   const char *complex_keywords[] = {
       "how do i", "help me", "what should", "can you", "i need to",
-      "remember to", "set up", "configure", "schedule", "remind me to",
+      "remember to", "set up", "configure", "schedule", "remind ", "remind me to",
+      "in 1 ", "in 2 ", "in 3 ", "in 4 ", "in 5 ", "in 10 ", "in 15 ", "in 20 ", "in 30 ",
       "figure out", "find out", "check if", "make sure", "todo", "task",
       "plan", "organize", "track",
       // Web generation triggers

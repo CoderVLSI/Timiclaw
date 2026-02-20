@@ -199,17 +199,9 @@
 #define WEB_JOB_TIMEOUT_MS 20000
 #endif
 
-// WhatsApp Baileys service endpoint
-#ifndef WHATSAPP_ENDPOINT_URL
-#define WHATSAPP_ENDPOINT_URL ""
-#endif
-
-#ifndef WHATSAPP_API_KEY
-#define WHATSAPP_API_KEY ""
-#endif
-
-#ifndef WHATSAPP_TIMEOUT_MS
-#define WHATSAPP_TIMEOUT_MS 15000
+// Discord Webhook URL for autonomous messages and files
+#ifndef DISCORD_WEBHOOK_URL
+#define DISCORD_WEBHOOK_URL ""
 #endif
 
 // GitHub repo for auto-updates (format: username/repo)

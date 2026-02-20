@@ -7,5 +7,6 @@
 void scheduler_init();
 void scheduler_tick(incoming_cb_t dispatch_cb);
 void scheduler_time_debug(String &out);
+bool scheduler_get_local_time(struct tm &tm_out);
 
 #endif
