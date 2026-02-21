@@ -3610,8 +3610,11 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
-  if (cmd_lc == "reminder_set_daily" || cmd_lc.startsWith("reminder_set_daily ")) {
-    String tail = cmd.length() > 18 ? cmd.substring(18) : "";
+  if (cmd_lc == "reminder_set_daily" || cmd_lc.startsWith("reminder_set_daily ") ||
+      cmd_lc == "remider_set_daily" || cmd_lc.startsWith("remider_set_daily ") ||
+      cmd_lc == "remainder_set_daily" || cmd_lc.startsWith("remainder_set_daily ")) {
+    int first_space = cmd.indexOf(' ');
+    String tail = first_space >= 0 ? cmd.substring(first_space + 1) : "";
     tail.trim();
     int sp = tail.indexOf(' ');
     if (sp <= 0) {

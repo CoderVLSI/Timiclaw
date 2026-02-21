@@ -391,7 +391,83 @@ static bool response_contains_code(const String &text) {
          (lc.indexOf("const ") >= 0 && lc.indexOf("=>") >= 0);
 }
 
-static bool extract_embedded_web_files_command(const String &text, String &cmd_out) {
+static bool looks_like_actionable_hint_command(const String &candidate_raw) {
+  String candidate = candidate_raw;
+  candidate.trim();
+  if (candidate.length() < 3) {
+    return false;
+  }
+  if (candidate.startsWith("/")) {
+    candidate.remove(0, 1);
+    candidate.trim();
+  }
+  if (candidate.length() == 0) {
+    return false;
+  }
+
+  String lc = candidate;
+  lc.toLowerCase();
+
+  // Never auto-run raw shell-like heredoc or minos script blocks from model prose.
+  if (lc.indexOf('\n') >= 0 || lc.indexOf('\r') >= 0 || lc.indexOf("<<") >= 0 ||
+      lc.indexOf("eof") >= 0 || lc.startsWith("minos ")) {
+    return false;
+  }
+
+  const char *prefixes[] = {
+      "web_files_make",
+      "host",
+      "host_code",
+      "serve",
+      "deploy",
+      "list projects",
+      "files_get ",
+      "files_list",
+      "timezone_set ",
+      "timezone_show",
+      "reminder_set_daily ",
+      "remider_set_daily ",
+      "remainder_set_daily ",
+      "reminder_show",
+      "reminder_clear",
+      "cron_add ",
+      "webjob_set_daily ",
+      "webjob_show",
+      "webjob_run",
+      "webjob_clear",
+      "search ",
+      "model use ",
+      "model set ",
+      "model clear ",
+      "model select ",
+  };
+  for (size_t i = 0; i < (sizeof(prefixes) / sizeof(prefixes[0])); i++) {
+    String p = String(prefixes[i]);
+    if (lc == p || lc.startsWith(p)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static String sanitize_hint_command(String candidate) {
+  candidate.trim();
+  while (candidate.length() >= 2 &&
+         ((candidate.startsWith("`") && candidate.endsWith("`")) ||
+          (candidate.startsWith("\"") && candidate.endsWith("\"")) ||
+          (candidate.startsWith("'") && candidate.endsWith("'")))) {
+    candidate = candidate.substring(1, candidate.length() - 1);
+    candidate.trim();
+  }
+  if (candidate.startsWith("/")) {
+    candidate.remove(0, 1);
+    candidate.trim();
+  }
+  return candidate;
+}
+
+static bool extract_embedded_tool_command(const String &text, String &cmd_out) {
   cmd_out = "";
 
   int pos = 0;
@@ -408,42 +484,64 @@ static bool extract_embedded_web_files_command(const String &text, String &cmd_o
     if (close < 0) {
       break;
     }
-    String candidate = text.substring(open + 1, close);
-    candidate.trim();
-    if (candidate.startsWith("/")) {
-      candidate.remove(0, 1);
-    }
-
-    String lc = candidate;
-    lc.toLowerCase();
-    if (lc == "web_files_make") {
-      cmd_out = "web_files_make website";
-      return true;
-    }
-    if (lc.startsWith("web_files_make ")) {
-      cmd_out = candidate;
-      cmd_out.trim();
-      return cmd_out.length() > 15;
+    String candidate = sanitize_hint_command(text.substring(open + 1, close));
+    if (candidate.length() > 0) {
+      String lc = candidate;
+      lc.toLowerCase();
+      if (lc == "web_files_make") {
+        cmd_out = "web_files_make website";
+        return true;
+      }
+      if (looks_like_actionable_hint_command(candidate)) {
+        cmd_out = candidate;
+        return true;
+      }
     }
     pos = close + 1;
   }
 
-  String lc_text = text;
-  lc_text.toLowerCase();
-  int p = lc_text.indexOf("web_files_make ");
-  if (p >= 0) {
-    int end = p;
-    while (end < (int)text.length() && text[end] != '\n' && text[end] != '\r' &&
-           text[end] != '`') {
-      end++;
+  // Try line-by-line fallback for plain text commands emitted by the model.
+  int cursor = 0;
+  while (cursor < (int)text.length()) {
+    int nl = text.indexOf('\n', cursor);
+    if (nl < 0) {
+      nl = text.length();
     }
-    String candidate = text.substring(p, end);
-    candidate.trim();
-    if (candidate.length() > 15) {
-      cmd_out = candidate;
+    String line = sanitize_hint_command(text.substring(cursor, nl));
+    if (looks_like_actionable_hint_command(line)) {
+      cmd_out = line;
       return true;
     }
+    cursor = nl + 1;
   }
+
+  // Pattern fallback for common bare command mentions in a longer sentence.
+  String lc_text = text;
+  lc_text.toLowerCase();
+  const char *anchors[] = {
+      "web_files_make ",
+      "reminder_set_daily ",
+      "remider_set_daily ",
+      "remainder_set_daily ",
+      "cron_add ",
+      "timezone_set ",
+  };
+  for (size_t i = 0; i < (sizeof(anchors) / sizeof(anchors[0])); i++) {
+    int p = lc_text.indexOf(anchors[i]);
+    if (p >= 0) {
+      int end = p;
+      while (end < (int)text.length() && text[end] != '\n' && text[end] != '\r' &&
+             text[end] != '`') {
+        end++;
+      }
+      String candidate = sanitize_hint_command(text.substring(p, end));
+      if (looks_like_actionable_hint_command(candidate)) {
+        cmd_out = candidate;
+        return true;
+      }
+    }
+  }
+
   return false;
 }
 
@@ -610,7 +708,7 @@ String agent_loop_process_message(const String &msg) {
       String err;
       if (llm_generate_reply(trimmed, response, err)) {
         String hinted_cmd;
-        if (extract_embedded_web_files_command(response, hinted_cmd)) {
+        if (extract_embedded_tool_command(response, hinted_cmd)) {
           String hinted_out;
           if (tool_registry_execute(hinted_cmd, hinted_out)) {
             event_log_append("ROUTE: " + hinted_cmd + " (from model hint)");
