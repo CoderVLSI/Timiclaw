@@ -21,6 +21,7 @@
 #include "transport_telegram.h"
 #include "web_job_client.h"
 #include "web_server.h"
+#include "web_search.h"
 #include "email_client.h"
 #include "discord_client.h"
 #include "usage_stats.h"
@@ -202,7 +203,8 @@ void build_help_text(String &out) {
   out += "/email_code [email] - Email last code\n";
   out += "/email_files <email> <topic> - Generate & email web files\n";
   out += "/files_list - List all SPIFFS files\n";
-  out += "/files_get <filename> - Read a file\n";
+  out += "Say \"list projects\" - List saved /projects folders\n";
+  out += "/files_get <filename> - Read a file (supports /projects/... paths)\n";
   out += "/files_email <filename> <email> - Email a file\n";
   out += "/files_email_all <email> - Email all files\n";
 #endif
@@ -211,6 +213,7 @@ void build_help_text(String &out) {
   out += "/safe_mode - Toggle safe mode\n";
   out += "/logs - Show logs\n";
   out += "/logs_clear - Clear logs\n";
+  out += "/search <query> - Web search (Serper > Tavily)\n";
   out += "/time_show - Show current time\n";
   out += "/soul_show - Show soul\n";
   out += "/soul_set <text> - Update soul\n";
@@ -228,6 +231,7 @@ void build_help_text(String &out) {
   out += "/skill_add <name> <desc>: <instructions> - Add skill\n";
   out += "/skill_remove <name> - Remove skill\n";
   out += "/use_skill <name> [request] - Execute a skill\n";
+  out += "/minos <cmd> - Run MinOS shell (use /projects/<name>/ for project folders)\n";
   out += "\n💬 Just chat with me normally too! I'll use tools when needed.";
 }
 
@@ -793,6 +797,21 @@ static String sanitize_web_topic(const String &input) {
   return out;
 }
 
+static String topic_to_project_slug(const String &topic) {
+  String slug = sanitize_web_topic(topic);
+  slug.toLowerCase();
+  slug.replace(" ", "_");
+  slug.replace("-", "_");
+  while (slug.indexOf("__") >= 0) {
+    slug.replace("__", "_");
+  }
+  slug.trim();
+  if (slug.length() == 0) {
+    slug = "website";
+  }
+  return slug;
+}
+
 static bool extract_web_files_topic_from_text(const String &input, String &topic_out) {
   String text = input;
   text.trim();
@@ -984,6 +1003,21 @@ static bool send_small_web_files(const String &topic, String &out) {
   String js;
   build_small_web_files(topic, html, css, js);
 
+  const String project_slug = topic_to_project_slug(topic);
+  const String project_dir = "/projects/" + project_slug;
+  const String index_path = project_dir + "/index.html";
+  const String css_path = project_dir + "/styles.css";
+  const String js_path = project_dir + "/script.js";
+  String save_err_index;
+  String save_err_css;
+  String save_err_js;
+  const bool saved_index = file_memory_write_file(index_path, html, save_err_index);
+  const bool saved_css = file_memory_write_file(css_path, css, save_err_css);
+  const bool saved_js = file_memory_write_file(js_path, js, save_err_js);
+  if (saved_index) {
+    agent_loop_set_last_file(index_path, html);
+  }
+
   // Publish files to web server
   web_server_publish_file("index.html", html, "text/html");
   web_server_publish_file("styles.css", css, "text/css");
@@ -1009,7 +1043,11 @@ static bool send_small_web_files(const String &topic, String &out) {
   // Include web server URL
   String server_url = web_server_get_url();
   out = "Sent small web files for \"" + topic + "\".\nFiles: index.html, styles.css, script.js\n\n";
+  out += "Project saved to: " + project_dir + "\n";
   out += "🌐 Site live at: " + server_url;
+  if (!saved_index || !saved_css || !saved_js) {
+    out += "\nWARN: saved project files partially";
+  }
   return true;
 }
 
@@ -1304,6 +1342,370 @@ static String build_media_instruction(const String &user_message, bool is_pdf_mo
                 "Actionable takeaways.\n"
                 "User request: ") +
          user_message;
+}
+
+static bool extract_projects_path_from_text(const String &input, String &path_out) {
+  const int start = input.indexOf("/projects/");
+  if (start < 0) {
+    return false;
+  }
+  int end = start;
+  while (end < (int)input.length()) {
+    const char c = input[end];
+    const bool stop =
+        (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ',' || c == ';' ||
+         c == ')' || c == '(' || c == '"' || c == '\'');
+    if (stop) {
+      break;
+    }
+    end++;
+  }
+
+  String path = input.substring(start, end);
+  while (path.endsWith(".") || path.endsWith(",") || path.endsWith("!") || path.endsWith("?")) {
+    path.remove(path.length() - 1);
+  }
+  path.trim();
+  if (path.length() == 0) {
+    return false;
+  }
+  path_out = path;
+  return true;
+}
+
+static bool is_natural_web_iteration_request(const String &cmd_lc) {
+  const char *edit_terms[] = {
+      "improve",
+      "better",
+      "modern",
+      "stunning",
+      "beautiful",
+      "polish",
+      "revamp",
+      "redesign",
+      "enhance",
+      "upgrade ui",
+      "make it",
+      "update this",
+      "tweak",
+  };
+  const char *web_terms[] = {
+      "website",
+      "web site",
+      "landing page",
+      "page",
+      "saas",
+      "html",
+      "css",
+      "frontend",
+      "ui",
+      "index.html",
+      "/projects/",
+  };
+
+  const bool has_edit =
+      text_has_any(cmd_lc, edit_terms, sizeof(edit_terms) / sizeof(edit_terms[0]));
+  const bool has_web = text_has_any(cmd_lc, web_terms, sizeof(web_terms) / sizeof(web_terms[0]));
+  const bool has_pronoun = (cmd_lc.indexOf(" it ") >= 0) || (cmd_lc.indexOf(" this ") >= 0) ||
+                           (cmd_lc.indexOf(" that ") >= 0) || cmd_lc.endsWith(" it") ||
+                           cmd_lc.endsWith(" this") || cmd_lc.endsWith(" that");
+
+  if (!has_edit) {
+    return false;
+  }
+  if (has_web) {
+    return true;
+  }
+  if (!has_pronoun) {
+    return false;
+  }
+
+  String last_name = agent_loop_get_last_file_name();
+  last_name.toLowerCase();
+  if (last_name.startsWith("/projects/")) {
+    return true;
+  }
+  return last_name.endsWith(".html") || last_name.endsWith(".htm") ||
+         last_name.endsWith(".css") || last_name.endsWith(".js");
+}
+
+static bool extract_first_code_block_content(const String &text, String &code_out) {
+  int open = text.indexOf("```");
+  if (open < 0) {
+    code_out = text;
+    code_out.trim();
+    return code_out.length() > 0;
+  }
+  int start = text.indexOf('\n', open + 3);
+  if (start < 0) {
+    return false;
+  }
+  start++;
+  int close = text.indexOf("```", start);
+  if (close < 0 || close <= start) {
+    return false;
+  }
+  code_out = text.substring(start, close);
+  code_out.trim();
+  return code_out.length() > 0;
+}
+
+static String file_basename(const String &path) {
+  int slash = path.lastIndexOf('/');
+  if (slash < 0 || slash + 1 >= (int)path.length()) {
+    return path;
+  }
+  return path.substring(slash + 1);
+}
+
+static String mime_from_filename(const String &filename) {
+  String lc = filename;
+  lc.toLowerCase();
+  if (lc.endsWith(".html") || lc.endsWith(".htm")) {
+    return "text/html";
+  }
+  if (lc.endsWith(".css")) {
+    return "text/css";
+  }
+  if (lc.endsWith(".js")) {
+    return "application/javascript";
+  }
+  if (lc.endsWith(".json")) {
+    return "application/json";
+  }
+  return "text/plain";
+}
+
+static bool extract_project_name_from_path(const String &path, String &project_out) {
+  if (!path.startsWith("/projects/")) {
+    return false;
+  }
+  const int start = 10;  // strlen("/projects/")
+  int slash = path.indexOf('/', start);
+  if (slash <= start) {
+    return false;
+  }
+  project_out = path.substring(start, slash);
+  project_out.trim();
+  return project_out.length() > 0;
+}
+
+static bool list_saved_projects(String &out) {
+  String file_list;
+  String err;
+  if (!file_memory_list_files(file_list, err)) {
+    out = "ERR: " + err;
+    return true;
+  }
+
+  String projects[32];
+  int count = 0;
+  int cursor = 0;
+  while (cursor < (int)file_list.length()) {
+    int nl = file_list.indexOf('\n', cursor);
+    if (nl < 0) {
+      nl = file_list.length();
+    }
+    String line = file_list.substring(cursor, nl);
+    cursor = nl + 1;
+    line.trim();
+    if (!line.startsWith("• ")) {
+      continue;
+    }
+    int size_mark = line.indexOf(" (");
+    String path = (size_mark > 2) ? line.substring(2, size_mark) : line.substring(2);
+    path.trim();
+    String project;
+    if (!extract_project_name_from_path(path, project)) {
+      continue;
+    }
+
+    bool exists = false;
+    for (int i = 0; i < count; i++) {
+      if (projects[i] == project) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists && count < 32) {
+      projects[count++] = project;
+    }
+  }
+
+  if (count == 0) {
+    out = "No saved projects yet.\nAsk: create a website for <topic>";
+    return true;
+  }
+
+  out = "Saved projects (" + String(count) + "):\n";
+  for (int i = 0; i < count; i++) {
+    out += String(i + 1) + ". /projects/" + projects[i] + "\n";
+  }
+  out += "\nUse: files_get /projects/<name>/index.html";
+  return true;
+}
+
+static bool is_list_projects_request(const String &cmd_lc) {
+  if (cmd_lc == "projects" || cmd_lc == "project" || cmd_lc == "projects_list" ||
+      cmd_lc == "projects list" || cmd_lc == "list projects" || cmd_lc == "show projects") {
+    return true;
+  }
+  const bool has_project = (cmd_lc.indexOf("project") >= 0);
+  const bool has_list_word = (cmd_lc.indexOf("list") >= 0) || (cmd_lc.indexOf("show") >= 0) ||
+                             (cmd_lc.indexOf("what") >= 0) || (cmd_lc.indexOf("which") >= 0);
+  const bool has_history_word = (cmd_lc.indexOf("made") >= 0) || (cmd_lc.indexOf("created") >= 0) ||
+                                (cmd_lc.indexOf("saved") >= 0) || (cmd_lc.indexOf("have") >= 0);
+  return has_project && (has_list_word || has_history_word);
+}
+
+static bool is_web_asset_filename(const String &filename) {
+  String lc = filename;
+  lc.toLowerCase();
+  return lc.endsWith(".html") || lc.endsWith(".htm") || lc.endsWith(".css") ||
+         lc.endsWith(".js");
+}
+
+static String code_fence_language_from_filename(const String &filename) {
+  String lc = filename;
+  lc.toLowerCase();
+  if (lc.endsWith(".html") || lc.endsWith(".htm")) {
+    return "html";
+  }
+  if (lc.endsWith(".css")) {
+    return "css";
+  }
+  if (lc.endsWith(".js")) {
+    return "javascript";
+  }
+  if (lc.endsWith(".json")) {
+    return "json";
+  }
+  return "text";
+}
+
+static bool resolve_web_iteration_target_path(const String &input, String &path_out,
+                                              String &error_out) {
+  String explicit_path;
+  if (extract_projects_path_from_text(input, explicit_path)) {
+    path_out = explicit_path;
+    return true;
+  }
+
+  String last_name = agent_loop_get_last_file_name();
+  last_name.trim();
+  if (last_name.startsWith("/projects/")) {
+    path_out = last_name;
+    return true;
+  }
+
+  String last_content = agent_loop_get_last_file_content();
+  if (last_name.length() > 0 && is_web_asset_filename(last_name) && last_content.length() > 0) {
+    String scratch_path = "/projects/scratch/" + file_basename(last_name);
+    String write_err;
+    if (!file_memory_write_file(scratch_path, last_content, write_err)) {
+      error_out = "Failed to create editable project copy: " + write_err;
+      return false;
+    }
+    path_out = scratch_path;
+    return true;
+  }
+
+  const char *fallbacks[] = {
+      "/projects/default/index.html",
+      "/projects/website/index.html",
+      "/projects/mini_demo/index.html",
+      "/projects/saas_website/index.html",
+  };
+  for (size_t i = 0; i < sizeof(fallbacks) / sizeof(fallbacks[0]); i++) {
+    String probe;
+    String probe_err;
+    if (file_memory_read_file(String(fallbacks[i]), probe, probe_err)) {
+      path_out = String(fallbacks[i]);
+      return true;
+    }
+  }
+
+  error_out = "No website file found yet. Ask me: create a website first, then say make it better.";
+  return false;
+}
+
+static bool run_natural_web_iteration(const String &user_request, String &out) {
+  String target_path;
+  String resolve_err;
+  if (!resolve_web_iteration_target_path(user_request, target_path, resolve_err)) {
+    out = resolve_err;
+    return true;
+  }
+
+  String current_content;
+  String read_err;
+  if (!file_memory_read_file(target_path, current_content, read_err)) {
+    out = "ERR: " + read_err;
+    return true;
+  }
+  if (current_content.length() == 0) {
+    out = "ERR: target file is empty: " + target_path;
+    return true;
+  }
+
+  String filename = file_basename(target_path);
+  String lang = code_fence_language_from_filename(filename);
+  String source_for_model = current_content;
+  const size_t kMaxSourceChars = 10000;
+  if (source_for_model.length() > kMaxSourceChars) {
+    source_for_model = source_for_model.substring(0, kMaxSourceChars) + "\n... (truncated)";
+  }
+
+  String system_prompt =
+      "You edit exactly one existing website file.\n"
+      "Return only the full updated file in one fenced code block.\n"
+      "No explanation outside the code block.\n"
+      "Keep the same language and file purpose.";
+
+  String task =
+      "User request:\n" + user_request + "\n\n"
+      "Target file path: " + target_path + "\n"
+      "Filename: " + filename + "\n\n"
+      "Current file content:\n```" + lang + "\n" + source_for_model + "\n```";
+
+  String llm_reply;
+  String llm_err;
+  if (!llm_generate_with_custom_prompt(system_prompt, task, false, llm_reply, llm_err)) {
+    out = "ERR: " + llm_err;
+    return true;
+  }
+
+  String updated_content;
+  if (!extract_first_code_block_content(llm_reply, updated_content) ||
+      updated_content.length() == 0) {
+    out = "ERR: Could not parse updated file content from model output";
+    return true;
+  }
+
+  String write_err;
+  if (!file_memory_write_file(target_path, updated_content, write_err)) {
+    out = "ERR: " + write_err;
+    return true;
+  }
+
+  agent_loop_set_last_file(target_path, updated_content);
+
+  const String mime = mime_from_filename(filename);
+  bool doc_sent =
+      transport_telegram_send_document(filename, updated_content, mime, "Updated file");
+
+  String base_lc = filename;
+  base_lc.toLowerCase();
+  if (base_lc == "index.html" || base_lc == "styles.css" || base_lc == "script.js") {
+    web_server_publish_file(filename, updated_content, mime);
+  }
+
+  event_log_append("WEBFILES updated path=" + target_path);
+  out = "Updated and saved: " + target_path;
+  if (!doc_sent) {
+    out += "\nWARN: updated file saved, but sending document failed";
+  }
+  return true;
 }
 
 static String normalize_command(const String &input) {
@@ -2030,6 +2432,26 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+  // Web search command (Serper > Tavily fallback)
+  if (cmd_lc == "search" || cmd_lc.startsWith("search ")) {
+    String query;
+    if (cmd_lc.startsWith("search ")) {
+      query = cmd.substring(7);
+    }
+    query.trim();
+
+    if (query.length() == 0) {
+      out = "ERR: usage search <query>\nExample: search ESP32 programming tips";
+      return true;
+    }
+
+    String error;
+    if (!web_search_simple(query, out, error)) {
+      out = "ERR: " + error;
+    }
+    return true;
+  }
+
   if (cmd_lc == "time_show" || cmd_lc == "clock" || cmd_lc == "time") {
     scheduler_time_debug(out);
     return true;
@@ -2444,6 +2866,10 @@ bool tool_registry_execute(const String &input, String &out) {
     return run_webjob_now_task(web_query, out);
   }
 #endif
+
+  if (is_natural_web_iteration_request(cmd_lc)) {
+    return run_natural_web_iteration(cmd, out);
+  }
 
   // HOST / SERVE / DEPLOY - publish last response as web page (always available)
   if (cmd_lc == "host_code" || cmd_lc.startsWith("host_code ") ||
@@ -3298,6 +3724,10 @@ bool tool_registry_execute(const String &input, String &out) {
     }
     out = list;
     return true;
+  }
+
+  if (is_list_projects_request(cmd_lc)) {
+    return list_saved_projects(out);
   }
 
   // files_get - Read a file from SPIFFS

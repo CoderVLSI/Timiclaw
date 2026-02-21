@@ -92,7 +92,8 @@ static bool is_internal_dispatch_message(const String &msg) {
   String lc = msg;
   lc.trim();
   lc.toLowerCase();
-  return lc == "heartbeat_run" || lc == "reminder_run";
+  return lc == "heartbeat_run" || lc == "reminder_run" || lc == "proactive_check" ||
+         lc == "status";
 }
 
 static bool should_try_route(const String &msg) {
@@ -444,9 +445,6 @@ String agent_loop_process_message(const String &msg) {
   Serial.println(msg);
   event_log_append("IN: " + msg);
 
-  // Record user message in history (was missing!)
-  record_user_msg(msg);
-
   String response;
   bool handled = false;
 
@@ -505,44 +503,6 @@ String agent_loop_process_message(const String &msg) {
       String err;
       if (llm_generate_reply(trimmed, response, err)) {
         s_last_llm_response = response;
-        
-        // Scan for and execute embedded tool calls in backticks
-        // Example: `cron_add 10 12 * * * | hi`
-        int start_idx = 0;
-        while (true) {
-          int open_tick = response.indexOf('`', start_idx);
-          if (open_tick < 0) break;
-          
-          // Ignore triple backticks (code blocks)
-          if (open_tick + 2 < response.length() && response[open_tick+1] == '`' && response[open_tick+2] == '`') {
-            start_idx = open_tick + 3;
-            continue;
-          }
-
-          int close_tick = response.indexOf('`', open_tick + 1);
-          if (close_tick < 0) {
-            start_idx = open_tick + 1;
-            continue;
-          }
-          
-          String embedded_cmd = response.substring(open_tick + 1, close_tick);
-          embedded_cmd.trim();
-          
-          if (embedded_cmd.length() > 0) {
-            String tool_res;
-            if (tool_registry_execute(embedded_cmd, tool_res)) {
-              event_log_append("EMBEDDED tool: " + embedded_cmd);
-              Serial.println("[agent] Executed embedded tool: " + embedded_cmd);
-            }
-          }
-          
-          // Remove the backticked command so the user doesn't see it
-          response = response.substring(0, open_tick) + response.substring(close_tick + 1);
-          // start_idx stays the same because the string shrank around it
-        }
-
-        // Send any generated code as actual files via Telegram
-        extract_and_send_code_blocks(response);
 
         if (response.length() > 1400) {
           response = response.substring(0, 1400) + "...";
@@ -555,8 +515,6 @@ String agent_loop_process_message(const String &msg) {
       }
     }
   }
-
-  status_led_set_busy(false);
 
   status_led_set_busy(false);
 

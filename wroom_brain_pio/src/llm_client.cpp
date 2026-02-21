@@ -822,6 +822,13 @@ bool llm_generate_plan(const String &task, String &plan_out, String &error_out) 
 bool llm_generate_reply(const String &message, String &reply_out, String &error_out) {
   String system_prompt = String(kChatSystemPrompt);
 
+  system_prompt += "\n\nPROJECT FILE WORKFLOW (PREFER THIS FOR LONG CODING TASKS):\n"
+                   "- Persist code in SPIFFS under /projects/<project_name>/...\n"
+                   "- Read existing files before editing: files_list, files_get <path>\n"
+                   "- Use MinOS for file operations: minos mkdir, minos nano, minos append, minos cat\n"
+                   "- When user asks to modify previous code, prefer loading from SPIFFS file path instead of relying only on chat memory.\n"
+                   "- Keep edits incremental and return updated file output.";
+
   // Inject current time awareness
   String time_ctx = build_time_context();
   if (time_ctx.length() > 0) {
@@ -892,7 +899,8 @@ bool llm_generate_reply(const String &message, String &reply_out, String &error_
       task = "Recent conversation (last 15-30 turns):\n" + history + "\n\nCurrent user message:\n" + message;
     }
   }
-  // Include last generated file for iteration (short-term memory)
+  // Include last generated file for iteration (short-term memory fallback).
+  // Primary preference is project files in SPIFFS (/projects/...).
   // MOVED: Append to system prompt to avoid "User sent this" hallucination
   String last_file_content = agent_loop_get_last_file_content();
   if (last_file_content.length() > 0) {

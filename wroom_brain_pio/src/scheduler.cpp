@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <stdlib.h>
 #include <time.h>
 
 #include "brain_config.h"
@@ -156,6 +157,22 @@ static bool parse_hhmm(const String &value, int &hour_out, int &minute_out) {
   return true;
 }
 
+static long runtime_tz_offset_seconds() {
+  time_t now = time(nullptr);
+  if (now < 1700000000) {
+    return 0;
+  }
+
+  struct tm local_tm{};
+  struct tm utc_tm{};
+  localtime_r(&now, &local_tm);
+  gmtime_r(&now, &utc_tm);
+
+  const time_t local_epoch = mktime(&local_tm);
+  const time_t utc_epoch = mktime(&utc_tm);
+  return (long)difftime(local_epoch, utc_epoch);
+}
+
 static void ensure_time_configured() {
   if (WiFi.status() != WL_CONNECTED) {
     return;
@@ -171,17 +188,22 @@ static void ensure_time_configured() {
     }
   }
   tz = normalize_tz_for_esp(tz);
-  const long offset = resolve_tz_offset_seconds(tz);
-
-  if (s_time_configured && tz == s_last_tz && offset == s_last_tz_offset_seconds) {
+  if (s_time_configured && tz == s_last_tz) {
     return;
   }
 
+  setenv("TZ", tz.c_str(), 1);
+  tzset();
   configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);
+
   s_time_configured = true;
   s_last_tz = tz;
+  long offset = runtime_tz_offset_seconds();
+  if (offset == 0) {
+    offset = resolve_tz_offset_seconds(tz);
+  }
   s_last_tz_offset_seconds = offset;
-  Serial.println("[scheduler] time sync configured: " + tz + " offset=" + String((long)offset));
+  Serial.println("[scheduler] time sync configured: " + tz + " offset=" + String((long)s_last_tz_offset_seconds));
 }
 
 bool scheduler_get_local_time(struct tm &tm_out) {
@@ -190,8 +212,8 @@ bool scheduler_get_local_time(struct tm &tm_out) {
   if (now < 1700000000) {
     return false;
   }
-  now += s_last_tz_offset_seconds;
-  gmtime_r(&now, &tm_out);
+  localtime_r(&now, &tm_out);
+  s_last_tz_offset_seconds = runtime_tz_offset_seconds();
   return true;
 }
 
@@ -296,14 +318,14 @@ void scheduler_tick(incoming_cb_t dispatch_cb) {
   if ((long)(now - s_next_cron_check_ms) >= 0) {
     s_next_cron_check_ms = now + 15000;
 
-    // Check for missed jobs on first successful time sync
-    check_missed_cron_jobs(dispatch_cb);
-
     struct tm tm_now{};
     if (!scheduler_get_local_time(tm_now)) {
       // No time sync yet, skip cron check
       return;
     }
+
+    // Check for missed jobs on first successful time sync
+    check_missed_cron_jobs(dispatch_cb);
 
     const int current_minute = tm_now.tm_hour * 60 + tm_now.tm_min;
 
@@ -349,8 +371,8 @@ void scheduler_time_debug(String &out) {
 
   if (now >= 1700000000) {
     struct tm tm_now{};
-    time_t local_now = now + s_last_tz_offset_seconds;
-    gmtime_r(&local_now, &tm_now);
+    localtime_r(&now, &tm_now);
+    s_last_tz_offset_seconds = runtime_tz_offset_seconds();
     char buf[32];
     snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
              tm_now.tm_year + 1900, tm_now.tm_mon + 1, tm_now.tm_mday,
