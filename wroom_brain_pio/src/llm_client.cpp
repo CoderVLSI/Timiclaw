@@ -16,6 +16,7 @@
 #include "usage_stats.h"
 #include "skill_registry.h"
 #include "scheduler.h"
+#include "cron_store.h"
 #include <time.h>
 
 namespace {
@@ -104,6 +105,45 @@ String build_time_context() {
 
   return "It is " + String(day_name) + " " + String(period) + ", " +
          time_str + " (" + date_str + ")";
+}
+
+String build_schedule_context() {
+  String out = "";
+
+  CronJob jobs[CRON_MAX_JOBS];
+  const int cron_count = cron_store_get_all(jobs, CRON_MAX_JOBS);
+  if (cron_count <= 0) {
+    out += "Cron jobs: none\n";
+  } else {
+    out += "Cron jobs (" + String(cron_count) + "):\n";
+    for (int i = 0; i < cron_count; i++) {
+      out += "- " + cron_job_to_string(jobs[i]) + "\n";
+    }
+  }
+
+  String hhmm;
+  String msg;
+  String err;
+  if (persona_get_daily_reminder(hhmm, msg, err)) {
+    hhmm.trim();
+    msg.trim();
+    if (hhmm.length() > 0 && msg.length() > 0) {
+      const String webjob_prefix = "__WEBJOB__:";
+      if (msg.startsWith(webjob_prefix)) {
+        String task = msg.substring(webjob_prefix.length());
+        task.trim();
+        out += "Daily schedule: " + hhmm + " (webjob) " + task;
+      } else {
+        out += "Daily schedule: " + hhmm + " (reminder) " + msg;
+      }
+    } else {
+      out += "Daily schedule: none";
+    }
+  } else {
+    out += "Daily schedule: unknown";
+  }
+
+  return out;
 }
 
 namespace {
@@ -858,6 +898,7 @@ bool llm_generate_reply(const String &message, String &reply_out, String &error_
   const size_t kMaxSkillChars = 700;
   const size_t kMaxSoulChars = 420;
   const size_t kMaxMemoryChars = 700;
+  const size_t kMaxScheduleChars = 900;
   const size_t kMaxHistoryChars = 1200;
   const size_t kMaxLastFileChars = 1800;
   const size_t kMaxTaskChars = 5200;
@@ -886,6 +927,13 @@ bool llm_generate_reply(const String &message, String &reply_out, String &error_
     system_prompt += "\n\nCRITICAL: User timezone is NOT SET! If they ask to schedule a cron job, reminder, or ask for the time, "
                      "STOP and explicitly ask them 'What City/Country are you in?' FIRST. Then use the timezone_set tool.";
   }
+
+  // Inject real schedule state so LLM doesn't hallucinate reminder/cron status.
+  String schedule_ctx = build_schedule_context();
+  schedule_ctx = trim_with_ellipsis(schedule_ctx, kMaxScheduleChars);
+  system_prompt += "\n\nACTIVE SCHEDULE STATE (source of truth from cron.md + reminder store):\n" +
+                   schedule_ctx +
+                   "\nWhen user asks about reminders/cron, rely on this state before suggesting changes.";
 
   // Inject available skills so the agent knows what it can do
   String skill_descs = skill_get_descriptions_for_react();
