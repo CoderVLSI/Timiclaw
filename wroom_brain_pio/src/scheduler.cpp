@@ -24,6 +24,8 @@ static long s_last_tz_offset_seconds = 0;
 static unsigned long s_next_cron_check_ms = 0;
 static int s_last_cron_minute = -1;
 static bool s_checked_missed_jobs = false;  // Track if we've checked for missed jobs
+static unsigned long s_next_reminder_check_ms = 0;
+static int s_last_reminder_minute = -1;
 
 static String to_lower_copy(String value) {
   value.toLowerCase();
@@ -157,6 +159,39 @@ static bool parse_hhmm(const String &value, int &hour_out, int &minute_out) {
   return true;
 }
 
+static void check_daily_reminder(incoming_cb_t dispatch_cb, const struct tm &tm_now) {
+  const int current_minute = tm_now.tm_hour * 60 + tm_now.tm_min;
+  if (current_minute == s_last_reminder_minute) {
+    return;
+  }
+  s_last_reminder_minute = current_minute;
+
+  String hhmm;
+  String message;
+  String err;
+  if (!persona_get_daily_reminder(hhmm, message, err)) {
+    return;
+  }
+
+  hhmm.trim();
+  message.trim();
+  if (hhmm.length() == 0 || message.length() == 0) {
+    return;
+  }
+
+  int target_hour = -1;
+  int target_minute = -1;
+  if (!parse_hhmm(hhmm, target_hour, target_minute)) {
+    return;
+  }
+
+  if (tm_now.tm_hour == target_hour && tm_now.tm_min == target_minute) {
+    event_log_append("SCHED: reminder_run " + hhmm);
+    dispatch_cb(String("reminder_run"));
+    Serial.printf("[scheduler] Daily reminder triggered at %s\n", hhmm.c_str());
+  }
+}
+
 static long runtime_tz_offset_seconds() {
   time_t now = time(nullptr);
   if (now < 1700000000) {
@@ -278,6 +313,7 @@ void scheduler_init() {
   }
 
   s_next_cron_check_ms = millis() + 5000;
+  s_next_reminder_check_ms = millis() + 5000;
   Serial.println("[scheduler] cron jobs enabled");
 }
 
@@ -356,6 +392,18 @@ void scheduler_tick(incoming_cb_t dispatch_cb) {
         cron_store_update_last_check(current_time);
       }
     }
+  }
+
+  // Daily reminder check
+  if ((long)(now - s_next_reminder_check_ms) >= 0) {
+    s_next_reminder_check_ms = now + 15000;
+
+    struct tm tm_now{};
+    if (!scheduler_get_local_time(tm_now)) {
+      return;
+    }
+
+    check_daily_reminder(dispatch_cb, tm_now);
   }
 }
 

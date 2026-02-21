@@ -236,6 +236,9 @@ void build_help_text(String &out) {
   out += "/cron_list - List all cron jobs\n";
   out += "/cron_show - Show cron.md content\n";
   out += "/cron_clear - Clear all cron jobs\n";
+  out += "/reminder_set_daily <HH:MM> <msg> - Set daily reminder\n";
+  out += "/reminder_show - Show daily reminder\n";
+  out += "/reminder_clear - Clear daily reminder\n";
 #if ENABLE_WEB_JOBS
   out += "/web_files_make [topic] - Generate web files\n";
 #endif
@@ -314,7 +317,8 @@ void tool_registry_init() {
 #if ENABLE_PLAN
       "plan <task>, "
 #endif
-      "cron_add/cron_list/cron_show/cron_clear, timezone_show/timezone_set/timezone_clear, "
+      "cron_add/cron_list/cron_show/cron_clear, reminder_set_daily/reminder_show/reminder_clear, "
+      "timezone_show/timezone_set/timezone_clear, "
 #if ENABLE_WEB_JOBS
       "webjob_set_daily/webjob_show/webjob_run/webjob_clear, "
       "web_files_make, "
@@ -1836,6 +1840,41 @@ static bool is_valid_hhmm(const String &value) {
   const int hh = (h1 - '0') * 10 + (h2 - '0');
   const int mm = (m1 - '0') * 10 + (m2 - '0');
   return hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59;
+}
+
+static bool cron_expand_hhmm_shortcut(const String &input, String &cron_line_out) {
+  String tail = compact_spaces(input);
+  tail.trim();
+  if (tail.length() == 0) {
+    return false;
+  }
+
+  int pipe_pos = tail.indexOf('|');
+  String hhmm;
+  String command;
+
+  if (pipe_pos >= 0) {
+    hhmm = tail.substring(0, pipe_pos);
+    command = tail.substring(pipe_pos + 1);
+  } else {
+    int sp = tail.indexOf(' ');
+    if (sp <= 0) {
+      return false;
+    }
+    hhmm = tail.substring(0, sp);
+    command = tail.substring(sp + 1);
+  }
+
+  hhmm.trim();
+  command.trim();
+  if (!is_valid_hhmm(hhmm) || command.length() == 0) {
+    return false;
+  }
+
+  String hh = hhmm.substring(0, 2);
+  String mm = hhmm.substring(3, 5);
+  cron_line_out = mm + " " + hh + " * * * | " + command;
+  return true;
 }
 
 static void blue_led_write(bool on) {
@@ -3524,6 +3563,106 @@ bool tool_registry_execute(const String &input, String &out) {
     return true;
   }
 
+  if (cmd_lc == "reminder_set_daily" || cmd_lc.startsWith("reminder_set_daily ")) {
+    String tail = cmd.length() > 18 ? cmd.substring(18) : "";
+    tail.trim();
+    int sp = tail.indexOf(' ');
+    if (sp <= 0) {
+      out = "ERR: usage reminder_set_daily <HH:MM> <message>";
+      return true;
+    }
+
+    String hhmm = tail.substring(0, sp);
+    String message = tail.substring(sp + 1);
+    hhmm.trim();
+    message.trim();
+    if (!is_valid_hhmm(hhmm) || message.length() == 0) {
+      out = "ERR: usage reminder_set_daily <HH:MM> <message>";
+      return true;
+    }
+
+    if (!has_user_timezone()) {
+      s_pending_reminder_tz.active = true;
+      s_pending_reminder_tz.hhmm = hhmm;
+      s_pending_reminder_tz.message = message;
+      s_pending_reminder_tz.expires_ms = millis() + kPendingReminderTzMs;
+      clear_pending_reminder_details();
+      out = "Before I set that reminder, tell me your timezone.\n"
+            "Reply: timezone_set Asia/Kolkata";
+      return true;
+    }
+
+    String err;
+    if (!persona_set_daily_reminder(hhmm, message, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    event_log_append("REMINDER set daily " + hhmm);
+    out = "OK: daily reminder set at " + hhmm + "\nMessage: " + reminder_message_for_user(message);
+    return true;
+  }
+
+  if (cmd_lc == "reminder_show") {
+    String hhmm;
+    String msg;
+    String err;
+    if (!persona_get_daily_reminder(hhmm, msg, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    hhmm.trim();
+    msg.trim();
+    if (hhmm.length() == 0 || msg.length() == 0 || is_webjob_message(msg)) {
+      out = "Daily reminder is empty";
+      return true;
+    }
+    out = "Daily reminder at " + hhmm + "\nMessage: " + msg;
+    return true;
+  }
+
+  if (cmd_lc == "reminder_clear") {
+    String hhmm;
+    String msg;
+    String err;
+    if (!persona_get_daily_reminder(hhmm, msg, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    hhmm.trim();
+    msg.trim();
+    if (hhmm.length() == 0 || msg.length() == 0 || is_webjob_message(msg)) {
+      out = "Daily reminder is empty";
+      return true;
+    }
+    if (!persona_clear_daily_reminder(err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    out = "OK: daily reminder cleared";
+    return true;
+  }
+
+  if (cmd_lc == "reminder_run") {
+    String hhmm;
+    String msg;
+    String err;
+    if (!persona_get_daily_reminder(hhmm, msg, err)) {
+      out = "ERR: " + err;
+      return true;
+    }
+    hhmm.trim();
+    msg.trim();
+    if (hhmm.length() == 0 || msg.length() == 0) {
+      out = "Daily reminder is empty";
+      return true;
+    }
+    if (is_webjob_message(msg)) {
+      return run_webjob_now_task(webjob_task_from_message(msg), out);
+    }
+    out = "Reminder: " + reminder_message_for_user(msg);
+    return true;
+  }
+
 #if ENABLE_WEB_JOBS
   if (cmd_lc == "webjob_show") {
     String hhmm;
@@ -3551,10 +3690,16 @@ bool tool_registry_execute(const String &input, String &out) {
 
     if (tail.length() == 0) {
       out = "ERR: usage: cron_add <minute> <hour> <day> <month> <weekday> | <command>\n"
+            "Shortcut: cron_add <HH:MM> | <command>\n"
             "Example: cron_add 0 9 * * * | Good morning\n"
             "Fields: minute(0-59) hour(0-23) day(1-31) month(1-12) weekday(0-6, Sun=0)\n"
             "Use * for wildcard";
       return true;
+    }
+
+    String expanded;
+    if (cron_expand_hhmm_shortcut(tail, expanded)) {
+      tail = expanded;
     }
 
     String err;

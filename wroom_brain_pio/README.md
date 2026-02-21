@@ -88,6 +88,8 @@ Hardware and utility commands:
 - `/search <query>`
 - `/logs`, `/logs_clear`
 - `/cron_add <expr> | <cmd>`, `/cron_list`, `/cron_clear`
+- `/cron_add <HH:MM> | <cmd>` (shortcut for daily time-based cron)
+- `/reminder_set_daily <HH:MM> <message>`, `/reminder_show`, `/reminder_clear`
 
 ## Configuration Notes
 
