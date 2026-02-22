@@ -124,6 +124,7 @@ static bool should_try_route(const String &msg) {
       "build ",     "make ",      "generate ",  "update",     "upgrade",    "firmware",
       "website",    "html",       "web ",       "saas",       "landing",    "portfolio",
       "host ",      "serve ",     "deploy ",
+      "what ",      "who ",       "tell me",    "explain",    "define",
   };
 
   for (size_t i = 0; i < (sizeof(prefixes) / sizeof(prefixes[0])); i++) {

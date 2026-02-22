@@ -69,7 +69,7 @@
 #endif
 
 #ifndef LLM_TIMEOUT_MS
-#define LLM_TIMEOUT_MS 120000
+#define LLM_TIMEOUT_MS 180000
 #endif
 
 // Image generation provider (separate from chat LLM)
@@ -161,6 +161,10 @@
 
 #ifndef WEB_SEARCH_API_KEY
 #define WEB_SEARCH_API_KEY ""
+#endif
+
+#ifndef SERPER_API_KEY
+#define SERPER_API_KEY ""
 #endif
 
 #ifndef WEB_SEARCH_PROVIDER

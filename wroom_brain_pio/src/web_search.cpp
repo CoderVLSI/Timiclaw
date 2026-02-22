@@ -49,7 +49,10 @@ static String http_post(const String &url, const String &json_body, int *status_
   https.setConnectTimeout(10000);
   https.setTimeout(kTimeoutMs);
   https.addHeader("Content-Type", "application/json");
-  if (strlen(WEB_SEARCH_API_KEY) > 0) {
+  // Prefer Serper key, fallback to WEB_SEARCH_API_KEY
+  if (strlen(SERPER_API_KEY) > 0) {
+    https.addHeader("X-API-KEY", SERPER_API_KEY);
+  } else if (strlen(WEB_SEARCH_API_KEY) > 0) {
     https.addHeader("X-API-KEY", WEB_SEARCH_API_KEY);
   }
 
@@ -87,15 +90,13 @@ static String json_escape(const String &src) {
 
 static bool search_serper(const String &query, SearchResult *results, int *count,
                           String &error_out) {
-  if (strlen(WEB_SEARCH_API_KEY) == 0) {
+  if (strlen(SERPER_API_KEY) == 0) {
     error_out = "Serper API key not set";
     return false;
   }
 
   // Build Serper API request
-  String url = String(WEB_SEARCH_BASE_URL);
-  if (!url.endsWith("/")) url += "/";
-  url += "search";
+  String url = "https://google.serper.dev/search";
 
   String json = "{";
   json += "\"q\":\"" + json_escape(query) + "\",";
@@ -220,17 +221,14 @@ bool web_search(const String &query, SearchResult *results_out, int *results_cou
 
   // Try Serper first (if set or auto)
   if (provider == "serper" || provider == "auto") {
-    if (strlen(WEB_SEARCH_API_KEY) > 0) {
-      String url = String(WEB_SEARCH_BASE_URL);
-      url.toLowerCase();
-      if (url.indexOf("serper") >= 0 || provider == "serper") {
-        Serial.println("[search] Trying Serper...");
-        if (search_serper(query, results_out, results_count, error_out)) {
-          provider_used = "Serper";
-          return true;
-        }
-        Serial.println("[search] Serper failed: " + error_out);
+    // Use SERPER_API_KEY for Serper searches
+    if (strlen(SERPER_API_KEY) > 0) {
+      Serial.println("[search] Trying Serper...");
+      if (search_serper(query, results_out, results_count, error_out)) {
+        provider_used = "Serper";
+        return true;
       }
+      Serial.println("[search] Serper failed: " + error_out);
     }
   }
 

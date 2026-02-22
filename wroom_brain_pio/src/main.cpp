@@ -10,7 +10,7 @@ void setup() {
   agent_loop_init();
 
   // Setup OTA updates
-  ArduinoOTA.setHostname("wroom-brain");
+  ArduinoOTA.setHostname("wroom-brain-2");
   // ArduinoOTA.setPassword((const char *)WIFI_PASS);  // Password disabled for OTA testing
 
   ArduinoOTA.onStart([]() {

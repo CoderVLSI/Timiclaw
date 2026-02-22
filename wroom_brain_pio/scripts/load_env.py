@@ -68,6 +68,7 @@ ntp_server_1 = parsed.get("NTP_SERVER_1", "pool.ntp.org")
 ntp_server_2 = parsed.get("NTP_SERVER_2", "time.nist.gov")
 web_search_api_key = parsed.get("WEB_SEARCH_API_KEY", "")
 web_search_provider = parsed.get("WEB_SEARCH_PROVIDER", "auto")
+serper_api_key = parsed.get("SERPER_API_KEY", "")
 web_search_base_url = parsed.get("WEB_SEARCH_BASE_URL", "https://api.search.brave.com")
 web_search_timeout_ms = parsed.get("WEB_SEARCH_TIMEOUT_MS", "12000")
 web_search_results_max = parsed.get("WEB_SEARCH_RESULTS_MAX", "3")
@@ -152,6 +153,7 @@ generated_header.write_text(
             f"#define NTP_SERVER_2 {cpp_quoted(ntp_server_2)}",
             f"#define WEB_SEARCH_API_KEY {cpp_quoted(web_search_api_key)}",
             f"#define WEB_SEARCH_PROVIDER {cpp_quoted(web_search_provider)}",
+            f"#define SERPER_API_KEY {cpp_quoted(serper_api_key)}",
             f"#define WEB_SEARCH_BASE_URL {cpp_quoted(web_search_base_url)}",
             f"#define WEB_SEARCH_TIMEOUT_MS {web_search_timeout_ms}",
             f"#define WEB_SEARCH_RESULTS_MAX {web_search_results_max}",

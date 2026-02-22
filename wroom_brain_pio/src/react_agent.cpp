@@ -163,7 +163,13 @@ String build_react_system_prompt() {
             "⚡ DO: <tool_name> <parameters>\n"
             "When done, give final answer:\n"
             "✅ ANSWER: <response to user>\n\n"
-            "Guidelines:\n"
+            "IMPORTANT - SEARCH RESULTS HANDLING:\n"
+            "- When you receive search results, you MUST SUMMARIZE them in your own words!\n"
+            "- Extract the KEY INFORMATION and present it clearly\n"
+            "- Do NOT just paste the raw search results\n"
+            "- Give a direct, concise answer to the user's question\n"
+            "- Include relevant details but be brief\n\n"
+            "Other Guidelines:\n"
             "- Always THINK first, then DO one action\n"
             "- Read tool results, THINK again, continue\n"
             "- Use ANSWER when task is complete\n"
@@ -375,7 +381,12 @@ String build_react_context(const String &user_query, const ReactStep *steps,
       context += "✅ ANSWER: " + steps[i].thought + "\n";
     } else {
       context += "⚡ DO: " + steps[i].action + "\n";
-      context += "📊 Result: " + steps[i].tool_result + "\n\n";
+      // Truncate long tool results (especially search) to avoid overwhelming LLM
+      String result = steps[i].tool_result;
+      if (result.length() > 800) {
+        result = result.substring(0, 800) + "...[truncated]";
+      }
+      context += "📊 Result: " + result + "\n\n";
     }
   }
 
@@ -413,6 +424,9 @@ bool react_agent_should_use(const String &query) {
       "in 1 ", "in 2 ", "in 3 ", "in 4 ", "in 5 ", "in 10 ", "in 15 ", "in 20 ", "in 30 ",
       "figure out", "find out", "check if", "make sure", "todo", "task",
       "plan", "organize", "track",
+      // Search/info triggers
+      "what is", "what's", "who is", "who's", "tell me about", "search for",
+      "look up", "google", "explain", "define", "meaning of",
       // Web generation triggers
       "make a", "create a", "generate a", "build a", "website", "html",
       "saas", "landing page", "portfolio", "app", "web app",
