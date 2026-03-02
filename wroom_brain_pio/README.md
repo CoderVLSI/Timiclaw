@@ -90,6 +90,22 @@ Hardware and utility commands:
 - `/cron_add <expr> | <cmd>`, `/cron_list`, `/cron_clear`
 - `/cron_add <HH:MM> | <cmd>` (shortcut for daily time-based cron)
 - `/reminder_set_daily <HH:MM> <message>`, `/reminder_show`, `/reminder_clear`
+- `/pc_connect <alias|host>`, `/pc_status`, `/pc_run <cmd>`, `/pc_browser <task>` (starter queue mode)
+
+## PC + Browser Automation Starter (Queue Mode)
+
+This firmware now includes starter commands to prepare remote PC automation flows:
+
+- `/pc_connect office-pc` stores your active target label.
+- `/pc_status` shows quickstart and active target.
+- `/pc_run <command>` queues a shell task to event logs.
+- `/pc_browser <task>` queues a browser automation task to event logs.
+
+Current behavior is **queue-only starter mode** for safety and incremental rollout:
+
+- Tasks are logged as `pc_queue|...` entries in `/logs`.
+- No remote execution is performed yet.
+- Next step is wiring a desktop bridge agent that consumes these queued tasks.
 
 ## Configuration Notes
 

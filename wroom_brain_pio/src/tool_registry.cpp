@@ -293,7 +293,87 @@ void build_help_text(String &out) {
   out += "/skill_remove <name> - Remove skill\n";
   out += "/use_skill <name> [request] - Execute a skill\n";
   out += "/minos <cmd> - Run MinOS shell (use /projects/<name>/ for project folders)\n";
+  out += "/pc_connect <alias|host> - Save active PC target label\n";
+  out += "/pc_status - Show PC bridge quickstart and target\n";
+  out += "/pc_run <command> - Queue an allowlisted PC command via bridge\n";
+  out += "/pc_browser <task> - Queue browser automation task via bridge\n";
   out += "\n💬 Just chat with me normally too! I'll use tools when needed.";
+}
+
+String sanitize_pc_target(String value) {
+  value.trim();
+  value = compact_spaces(value);
+  if (value.length() > 48) {
+    value = value.substring(0, 48);
+    value.trim();
+  }
+
+  String out;
+  out.reserve(value.length());
+  for (size_t i = 0; i < value.length(); i++) {
+    const char c = value[i];
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+                    c == '.' || c == ':';
+    if (ok) {
+      out += c;
+    }
+  }
+  out.trim();
+  return out;
+}
+
+String pc_target_path() {
+  return "/memory/PC_TARGET.txt";
+}
+
+String pc_target_read() {
+  String err;
+  String value;
+  if (!file_memory_read_file(pc_target_path(), value, err)) {
+    return "";
+  }
+  value.trim();
+  return sanitize_pc_target(value);
+}
+
+bool pc_target_write(const String &value, String &out) {
+  const String clean = sanitize_pc_target(value);
+  if (clean.length() == 0) {
+    out = "ERR: target must be letters/numbers and optional - _ . :";
+    return true;
+  }
+
+  String err;
+  if (!file_memory_write_file(pc_target_path(), clean + "\n", err)) {
+    out = "ERR: failed saving target: " + err;
+    return true;
+  }
+  out = "OK: active PC target set to '" + clean + "'.";
+  return true;
+}
+
+String pc_bridge_quickstart(const String &target) {
+  String msg = "PC bridge is in starter mode (queue-only).\n";
+  msg += "Target: ";
+  msg += target.length() > 0 ? target : "(not set)";
+  msg += "\n";
+  msg += "Next: run desktop bridge from wroom_brain_pio/tools/pc_agent and wire webhook URL in firmware.";
+  return msg;
+}
+
+bool queue_pc_bridge_task(const String &kind, const String &payload, String &out) {
+  String target = pc_target_read();
+  if (target.length() == 0) {
+    out = "ERR: no PC target set. Use /pc_connect <alias|host> first.";
+    return true;
+  }
+
+  String entry = "pc_queue|target=" + target + "|kind=" + kind + "|payload=" + payload;
+  event_log_append(entry);
+  out = "OK: queued " + kind + " task for " + target + ".\n" +
+        "(Starter mode: task saved to event logs only.)";
+  return true;
 }
 
 String wifi_health_line() {
@@ -2906,6 +2986,42 @@ bool tool_registry_execute(const String &input, String &out) {
   if (cmd_lc == "status") {
     out = "OK: alive";
     return true;
+  }
+
+  if (cmd_lc == "pc_status") {
+    const String target = pc_target_read();
+    out = pc_bridge_quickstart(target);
+    return true;
+  }
+
+  if (cmd_lc == "pc_connect" || cmd_lc.startsWith("pc_connect ")) {
+    String value = cmd.length() > 10 ? cmd.substring(10) : "";
+    value.trim();
+    if (value.length() == 0) {
+      out = "Usage: /pc_connect <alias|host>\nExample: /pc_connect office-pc";
+      return true;
+    }
+    return pc_target_write(value, out);
+  }
+
+  if (cmd_lc == "pc_run" || cmd_lc.startsWith("pc_run ")) {
+    String payload = cmd.length() > 6 ? cmd.substring(6) : "";
+    payload = compact_spaces(payload);
+    if (payload.length() == 0) {
+      out = "Usage: /pc_run <allowlisted_command>";
+      return true;
+    }
+    return queue_pc_bridge_task("shell", payload, out);
+  }
+
+  if (cmd_lc == "pc_browser" || cmd_lc.startsWith("pc_browser ")) {
+    String payload = cmd.length() > 10 ? cmd.substring(10) : "";
+    payload = compact_spaces(payload);
+    if (payload.length() == 0) {
+      out = "Usage: /pc_browser <task_description>";
+      return true;
+    }
+    return queue_pc_bridge_task("browser", payload, out);
   }
 
   if (cmd_lc == "fresh_start" || cmd_lc == "start_fresh" || cmd_lc == "context_clear" ||
